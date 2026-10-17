@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Phoenix Downloader</string>
+
+    <!-- Home -->
+    <string name="search_hint">Search or enter url</string>
+    <string name="site_youtube">Youtube</string>
+    <string name="site_facebook">Facebook</string>
+    <string name="site_tiktok">TikTok</string>
+    <string name="site_hint">Tap a site → full browser (login supported)</string>
+    <string name="nav_home">HOME</string>
+    <string name="nav_downloads">DOWNLOADS</string>
+
+    <!-- Download dialog -->
+    <string name="rename">Rename</string>
+    <string name="change">Change</string>
+    <string name="path_label">Path:</string>
+    <string name="storage_free">%1$s FREE/%2$s</string>
+    <string name="section_music">Music</string>
+    <string name="section_video">Video</string>
+    <string name="download">DOWNLOAD</string>
+    <string name="fetching_formats">Fetching available formats…</string>
+    <string name="fetch_failed">Could not fetch formats. Check the link and try again.</string>
+    <string name="invalid_link">This doesn\'t look like a video link.</string>
+
+    <!-- Browser -->
+    <string name="video_detected">Video detected — tap to download</string>
+
+    <!-- Downloads -->
+    <string name="title_downloads">Downloads</string>
+    <string name="edit">Edit</string>
+    <string name="tab_all">All</string>
+    <string name="tab_video">Video</string>
+    <string name="tab_music">Music</string>
+    <string name="files_count">%1$d files</string>
+    <string name="status_downloading">Downloading…</string>
+    <string name="status_paused">Paused</string>
+    <string name="status_done">Done</string>
+    <string name="status_failed">Failed</string>
+    <string name="action_play">Play</string>
+    <string name="action_pause">Pause</string>
+    <string name="action_resume">Resume</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="action_delete">Delete</string>
+    <string name="action_share">Share</string>
+    <string name="delete_confirm">Delete this file?</string>
+    <string name="yes">Yes</string>
+    <string name="no">No</string>
+    <string name="empty_downloads">No downloads yet.\nPaste a video link to get started.</string>
+
+    <!-- Player / options -->
+    <string name="options_title">Choose action</string>
+    <string name="action_watch">Watch</string>
+    <string name="file_meta">%1$s · %2$s · %3$s</string>
+    <string name="stream_unavailable">Stream not available in this build yet.</string>
+    <string name="loading">Loading…</string>
+
+    <!-- Update -->
+    <string name="update_available">Update available</string>
+    <string name="update_now">Update</string>
+    <string name="update_later">Later</string>
+    <string name="ytdlp_updating">Updating downloader engine…</string>
+</resources>

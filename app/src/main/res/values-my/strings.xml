@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Phoenix Downloader</string>
+
+    <!-- Home -->
+    <string name="search_hint">ရှာပါ သို့မဟုတ် လင့်ခ်ထည့်ပါ</string>
+    <string name="site_youtube">Youtube</string>
+    <string name="site_facebook">Facebook</string>
+    <string name="site_tiktok">TikTok</string>
+    <string name="site_hint">ဆိုက်တစ်ခုနှိပ်ပါ → ဘရောင်ဇာအပြည့် (လော့ဂ်အင်ရ)</string>
+    <string name="nav_home">ပင်မ</string>
+    <string name="nav_downloads">ဒေါင်းလုဒ်များ</string>
+
+    <!-- Download dialog -->
+    <string name="rename">အမည်ပြောင်း</string>
+    <string name="change">ပြောင်း</string>
+    <string name="path_label">လမ်းကြောင်း:</string>
+    <string name="storage_free">%1$s လွတ်/%2$s</string>
+    <string name="section_music">အသံ</string>
+    <string name="section_video">ဗီဒီယို</string>
+    <string name="download">ဒေါင်းလုဒ်</string>
+    <string name="fetching_formats">ရနိုင်သော ဖော်မတ်များ ရှာနေသည်…</string>
+    <string name="fetch_failed">ဖော်မတ်များ ရယူ၍မရပါ။ လင့်ခ်စစ်ပြီး ထပ်ကြိုးစားပါ။</string>
+    <string name="invalid_link">ဗီဒီယိုလင့်ခ် ပုံမပေါ်ပါ။</string>
+
+    <!-- Browser -->
+    <string name="video_detected">ဗီဒီယိုတွေ့ပြီ — ဒေါင်းဖို့နှိပ်ပါ</string>
+
+    <!-- Downloads -->
+    <string name="title_downloads">ဒေါင်းလုဒ်များ</string>
+    <string name="edit">ပြင်</string>
+    <string name="tab_all">အားလုံး</string>
+    <string name="tab_video">ဗီဒီယို</string>
+    <string name="tab_music">အသံ</string>
+    <string name="files_count">ဖိုင် %1$d ခု</string>
+    <string name="status_downloading">ဒေါင်းနေသည်…</string>
+    <string name="status_paused">ရပ်ထားသည်</string>
+    <string name="status_done">ပြီးပြီ</string>
+    <string name="status_failed">မအောင်မြင်ပါ</string>
+    <string name="action_play">ဖွင့်</string>
+    <string name="action_pause">ရပ်</string>
+    <string name="action_resume">ဆက်</string>
+    <string name="action_cancel">ပယ်</string>
+    <string name="action_delete">ဖျက်</string>
+    <string name="action_share">မျှဝေ</string>
+    <string name="delete_confirm">ဒီဖိုင်ကို ဖျက်မလား?</string>
+    <string name="yes">ဟုတ်ကဲ့</string>
+    <string name="no">မဟုတ်ဘူး</string>
+    <string name="empty_downloads">ဒေါင်းလုဒ် မရှိသေးပါ။\nဗီဒီယိုလင့်ခ် ထည့်ပြီး စလိုက်ပါ။</string>
+
+    <!-- Player / options -->
+    <string name="options_title">ရွေးချယ်ပါ</string>
+    <string name="action_watch">ကြည့်မယ်</string>
+    <string name="file_meta">%1$s · %2$s · %3$s</string>
+    <string name="stream_unavailable">ဒီဗားရှင်းမှာ တိုက်ရိုက်ကြည့်လို့ မရသေးပါ။</string>
+    <string name="loading">လုပ်ဆောင်နေသည်…</string>
+
+    <!-- Update -->
+    <string name="update_available">အပ်ဒိတ် ရနေပြီ</string>
+    <string name="update_now">အပ်ဒိတ်</string>
+    <string name="update_later">နောက်မှ</string>
+    <string name="ytdlp_updating">ဒေါင်းလုဒ် အင်ဂျင် အပ်ဒိတ်လုပ်နေသည်…</string>
+</resources>
