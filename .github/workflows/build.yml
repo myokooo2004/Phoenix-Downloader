@@ -27,10 +27,10 @@ jobs:
         run: |
           curl -sL https://services.gradle.org/distributions/gradle-8.7-bin.zip -o /tmp/gradle.zip
           unzip -q /tmp/gradle.zip -d /opt
-          echo "/opt/gradle-8.7/bin" >> $GITHUB_PATH
+          /opt/gradle-8.7/bin/gradle --version
 
       - name: Build debug APK
-        run: gradle assembleDebug --stacktrace
+        run: /opt/gradle-8.7/bin/gradle assembleDebug --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
