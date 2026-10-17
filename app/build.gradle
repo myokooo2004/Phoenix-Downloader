@@ -1,7 +1,6 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
-    id("com.chaquo.python")
 }
 
 android {
@@ -48,14 +47,7 @@ android {
 
     // Keep resource names stable for the bilingual (en + my) builds
     resourceConfigurations += listOf("en", "my")
-
-    // Chaquopy: Python for Android — bundles yt-dlp
-    // (ABI filters are in android.defaultConfig.ndk above)
-    chaquopy {
-        defaultConfig {
-            version = "3.11"
-        }
-    }
+}
 }
 
 dependencies {
