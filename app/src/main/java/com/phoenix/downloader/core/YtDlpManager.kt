@@ -37,7 +37,7 @@ object YtDlpManager {
             val request = YoutubeDLRequest(url)
             request.addOption("--dump-json")
             request.addOption("--no-download")
-            val response = YoutubeDL.getInstance().execute(request, null, null)
+            val response = YoutubeDL.getInstance().execute(request)
             val json = org.json.JSONObject(response.out)
 
             Result.success(
@@ -64,7 +64,7 @@ object YtDlpManager {
             val request = YoutubeDLRequest(url)
             request.addOption("--dump-json")
             request.addOption("--no-download")
-            val response = YoutubeDL.getInstance().execute(request, null, null)
+            val response = YoutubeDL.getInstance().execute(request)
             val json = org.json.JSONObject(response.out)
 
             val music = mutableListOf<FormatOption>()
@@ -116,7 +116,7 @@ object YtDlpManager {
             val request = YoutubeDLRequest(url)
             request.addOption("-g")
             request.addOption("-f", "bv*+ba/b")
-            val response = YoutubeDL.getInstance().execute(request, null, null)
+            val response = YoutubeDL.getInstance().execute(request)
             val streamUrl = response.out.lineSequence().firstOrNull()?.trim()
             Result.success(streamUrl?.ifEmpty { null })
         } catch (e: Exception) {
