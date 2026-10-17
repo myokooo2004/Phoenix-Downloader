@@ -1,6 +1,7 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+    id("com.chaquo.python")
 }
 
 android {
@@ -47,6 +48,17 @@ android {
 
     // Keep resource names stable for the bilingual (en + my) builds
     resourceConfigurations += listOf("en", "my")
+
+    // Chaquopy: Python for Android — bundles yt-dlp
+    chaquopy {
+        defaultConfig {
+            // Only arm64 for now (most devices); add armeabi-v7a if needed
+            abiFilters("arm64-v8a")
+            pip {
+                install("yt-dlp")
+            }
+        }
+    }
 }
 
 dependencies {
