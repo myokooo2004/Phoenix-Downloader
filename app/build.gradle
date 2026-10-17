@@ -13,11 +13,6 @@ android {
         targetSdk = 34
         versionCode = 1
         versionName = "1.0"
-
-        // yt-dlp / aria2c native binaries ship per-ABI later
-        ndk {
-            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
-        }
     }
 
     buildTypes {
@@ -46,7 +41,7 @@ android {
     }
 
     // Keep resource names stable for the bilingual (en + my) builds
-    resourceConfigurations += listOf("en", "my")
+    resourceConfigurations += ["en", "my"]
 }
 
 dependencies {
