@@ -68,5 +68,5 @@ dependencies {
 
     // youtubedl-android — yt-dlp binary for Android (Seal uses this)
     // Provides YoutubeDL.getInstance() API with built-in updater
-    implementation("com.yausername.youtubedl-android:library:0.2.10")
+    implementation("com.github.yausername:youtubedl-android:0.18.1")
 }
