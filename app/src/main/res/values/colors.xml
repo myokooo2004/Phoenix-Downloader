@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- VidMate-style palette -->
+    <!-- App color palette -->
     <color name="red_accent">#E53935</color>
     <color name="red_dark">#C62828</color>
     <color name="bg">#F5F5F5</color>
