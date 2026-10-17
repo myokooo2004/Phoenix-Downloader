@@ -19,7 +19,7 @@
             android:layout_height="40dp"
             android:padding="10dp"
             android:src="@drawable/ic_back"
-            android:colorFilter="@color/white" />
+            android:tint="@color/white" />
 
         <TextView
             android:id="@+id/tv_player_title"
