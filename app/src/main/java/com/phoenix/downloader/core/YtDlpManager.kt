@@ -20,11 +20,13 @@ import kotlinx.coroutines.withContext
 object YtDlpManager {
 
     private var initialized = false
+    private var appContext: Context? = null
 
     /** Must be called once from Application.onCreate(). */
     fun init(context: Context) {
         if (!initialized) {
-            YoutubeDL.getInstance().init(context.applicationContext)
+            appContext = context.applicationContext
+            YoutubeDL.getInstance().init(appContext!!)
             initialized = true
         }
     }
@@ -128,8 +130,9 @@ object YtDlpManager {
      */
     suspend fun checkForUpdates(): Result<Boolean> = withContext(Dispatchers.IO) {
         try {
+            val ctx = appContext ?: return@withContext Result.failure(Exception("Not initialized"))
             val status = YoutubeDL.getInstance()
-                .updateYoutubeDL(null, YoutubeDL.UpdateChannel.STABLE)
+                .updateYoutubeDL(ctx, YoutubeDL.UpdateChannel.STABLE)
             Result.success(status == YoutubeDL.UpdateStatus.DONE)
         } catch (e: Exception) {
             Result.failure(e)
