@@ -6,6 +6,7 @@ import android.view.View
 import android.view.ViewGroup
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
 import com.phoenix.downloader.MainActivity
+import com.phoenix.downloader.R
 import com.phoenix.downloader.databinding.DialogVideoOptionsBinding
 
 /**

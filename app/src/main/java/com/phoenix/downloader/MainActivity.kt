@@ -9,6 +9,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import com.phoenix.downloader.databinding.ActivityMainBinding
+import com.phoenix.downloader.R
 import com.phoenix.downloader.ui.browser.BrowserFragment
 import com.phoenix.downloader.ui.download.DownloadDialogFragment
 import com.phoenix.downloader.ui.downloads.DownloadsFragment
