@@ -1,8 +1,13 @@
 package com.phoenix.downloader
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import com.phoenix.downloader.databinding.ActivityMainBinding
 import com.phoenix.downloader.ui.browser.BrowserFragment
 import com.phoenix.downloader.ui.download.DownloadDialogFragment
@@ -20,10 +25,16 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
 
+    private val permissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { /* granted or not — app continues, features degrade gracefully */ }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+
+        requestAppPermissions()
 
         binding.bottomNav.setOnItemSelectedListener { item ->
             when (item.itemId) {
@@ -101,5 +112,26 @@ class MainActivity : AppCompatActivity() {
     /** In-app playback of a downloaded file (incl. local 4K MP4). */
     fun openPlayerLocal(localPath: String, title: String) {
         showFragment(PlayerFragment.newLocalInstance(localPath, title), addToBackStack = true)
+    }
+
+    /**
+     * Request storage + notification permissions upfront at first launch.
+     * Storage: READ_MEDIA_VIDEO/AUDIO on API 33+, READ_EXTERNAL_STORAGE below.
+     * Notifications: POST_NOTIFICATIONS on API 33+ for download progress.
+     */
+    private fun requestAppPermissions() {
+        val needed = mutableListOf<String>()
+        if (Build.VERSION.SDK_INT >= 33) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_VIDEO) != PackageManager.PERMISSION_GRANTED)
+                needed.add(Manifest.permission.READ_MEDIA_VIDEO)
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_AUDIO) != PackageManager.PERMISSION_GRANTED)
+                needed.add(Manifest.permission.READ_MEDIA_AUDIO)
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
+                needed.add(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED)
+                needed.add(Manifest.permission.READ_EXTERNAL_STORAGE)
+        }
+        if (needed.isNotEmpty()) permissionLauncher.launch(needed.toTypedArray())
     }
 }
