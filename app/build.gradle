@@ -13,6 +13,8 @@ android {
         targetSdk = 34
         versionCode = 1
         versionName = "1.0"
+        // Keep resource names stable for the bilingual (en + my) builds
+        resourceConfigurations += ["en", "my"]
     }
 
     buildTypes {
@@ -39,9 +41,6 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
-
-    // Keep resource names stable for the bilingual (en + my) builds
-    resourceConfigurations += ["en", "my"]
 }
 
 dependencies {
