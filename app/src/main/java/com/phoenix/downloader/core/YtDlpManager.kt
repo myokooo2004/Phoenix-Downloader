@@ -115,7 +115,8 @@ object YtDlpManager {
         try {
             val request = YoutubeDLRequest(url)
             request.addOption("-g")
-            request.addOption("-f", "bv*+ba/b")
+            request.addOption("-f")
+            request.addOption("bv*+ba/b")
             val response = YoutubeDL.getInstance().execute(request)
             val streamUrl = response.out.lineSequence().firstOrNull()?.trim()
             Result.success(streamUrl?.ifEmpty { null })
