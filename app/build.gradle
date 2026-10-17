@@ -48,7 +48,6 @@ android {
     // Keep resource names stable for the bilingual (en + my) builds
     resourceConfigurations += listOf("en", "my")
 }
-}
 
 dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
@@ -66,4 +65,8 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer:$media3Version")
     implementation("androidx.media3:media3-ui:$media3Version")
     implementation("androidx.media3:media3-common:$media3Version")
+
+    // youtubedl-android — yt-dlp binary for Android (Seal uses this)
+    // Provides YoutubeDL.getInstance() API with built-in updater
+    implementation("com.yausername.youtubedl-android:library:0.2.10")
 }

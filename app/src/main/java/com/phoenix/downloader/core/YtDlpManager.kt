@@ -1,77 +1,157 @@
 package com.phoenix.downloader.core
 
+import android.content.Context
 import com.phoenix.downloader.model.FormatOption
 import com.phoenix.downloader.model.VideoInfo
+import com.yausername.youtubedl_android.YoutubeDL
+import com.yausername.youtubedl_android.YoutubeDLRequest
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
- * Wrapper around yt-dlp.
+ * Wrapper around yt-dlp via the youtubedl-android library.
  *
- * STUB — yt-dlp integration via Chaquopy is temporarily disabled
- * (build issues). The real implementation will shell out to yt-dlp
- * or use the Chaquopy Python bridge once the build is stable.
+ * This is the same library used by Seal and other top Android
+ * downloader apps. It bundles the yt-dlp binary + Python runtime,
+ * with a built-in updater (STABLE/NIGHTLY/MASTER channels).
  *
- * Until then these return deterministic mock data so the full
- * two-step flow (URL -> video info -> quality dialog) is testable.
- *
- * TODO:
- *  - Fix Chaquopy build integration
- *  - `yt-dlp --dump-json --no-download <url>` -> parse into [VideoInfo]
- *  - `yt-dlp -F --print formats <url>` -> parse into [FormatOption] lists
- *  - Auto-update: check GitHub Releases for a newer yt-dlp build
+ * Call [init] once from Application.onCreate() before use.
  */
 object YtDlpManager {
 
+    private var initialized = false
+
+    /** Must be called once from Application.onCreate(). */
+    fun init(context: Context) {
+        if (!initialized) {
+            YoutubeDL.getInstance().init(context.applicationContext)
+            initialized = true
+        }
+    }
+
     /** Step 1: resolve a video URL to its info (thumbnail, title, duration). */
-    suspend fun fetchVideoInfo(url: String): Result<VideoInfo> {
-        // TODO: replace with real yt-dlp call
-        return Result.success(
-            VideoInfo(
-                url = url,
-                title = "Sample video title",
-                uploader = "Sample channel",
-                durationSec = 170,
-                viewCount = "10M",
-                thumbnailUrl = null
+    suspend fun fetchVideoInfo(url: String): Result<VideoInfo> = withContext(Dispatchers.IO) {
+        try {
+            val request = YoutubeDLRequest(url)
+            request.addOption("--dump-json")
+            request.addOption("--no-download")
+            val response = YoutubeDL.getInstance().execute(request, null, null)
+            val json = org.json.JSONObject(response.out)
+
+            Result.success(
+                VideoInfo(
+                    url = url,
+                    title = json.optString("title", ""),
+                    uploader = json.optString("uploader", ""),
+                    durationSec = json.optInt("duration", 0),
+                    viewCount = formatViews(json.optLong("view_count", 0)),
+                    thumbnailUrl = json.optString("thumbnail", "").ifEmpty { null }
+                )
             )
-        )
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
     }
 
     /**
      * Step 2: list downloadable formats, split into music (audio-only)
-     * and video (video+audio / video-only) options.
+     * and video options for the quality grid.
      */
-    suspend fun fetchFormats(url: String): Result<FormatsResult> {
-        // TODO: replace with real yt-dlp parsing
-        val music = listOf(
-            FormatOption(id = "m4a-128", label = "128K", format = "M4A", sizeLabel = "2.75MB", isAudio = true),
-            FormatOption(id = "mp3-128", label = "128K", format = "MP3", sizeLabel = "2.75MB", isAudio = true),
-            FormatOption(id = "mp3-48", label = "48K", format = "MP3", sizeLabel = "1.13MB", isAudio = true),
-            FormatOption(id = "mp3-256", label = "256K", format = "MP3", sizeLabel = "2.88MB", isAudio = true)
-        )
-        val video = listOf(
-            FormatOption(id = "v144", label = "144P", format = "MP4", sizeLabel = "4.65MB"),
-            FormatOption(id = "v240", label = "240P", format = "MP4", sizeLabel = "6.87MB"),
-            FormatOption(id = "v360", label = "360P", format = "MP4", sizeLabel = "9.71MB", preselected = true),
-            FormatOption(id = "v480", label = "480P", format = "MP4", sizeLabel = "18.78MB"),
-            FormatOption(id = "v720", label = "720P HD", format = "MP4", sizeLabel = "34.14MB"),
-            FormatOption(id = "v1080", label = "1080P HD", format = "MP4", sizeLabel = "58.73MB"),
-            FormatOption(id = "v2k", label = "2K HD", format = "WebM", sizeLabel = "56.38MB"),
-            FormatOption(id = "v4k", label = "4K HD", format = "MP4", sizeLabel = "107.70MB")
-        )
-        return Result.success(FormatsResult(music = music, video = video))
+    suspend fun fetchFormats(url: String): Result<FormatsResult> = withContext(Dispatchers.IO) {
+        try {
+            val request = YoutubeDLRequest(url)
+            request.addOption("--dump-json")
+            request.addOption("--no-download")
+            val response = YoutubeDL.getInstance().execute(request, null, null)
+            val json = org.json.JSONObject(response.out)
+
+            val music = mutableListOf<FormatOption>()
+            val video = mutableListOf<FormatOption>()
+            val arr = json.optJSONArray("formats") ?: org.json.JSONArray()
+
+            for (i in 0 until arr.length()) {
+                val f = arr.getJSONObject(i)
+                if (!f.has("url")) continue
+
+                val vcodec = f.optString("vcodec", "none")
+                val acodec = f.optString("acodec", "none")
+                val height = f.optInt("height", 0)
+                val isAudioOnly = vcodec == "none" && acodec != "none"
+
+                val label = if (isAudioOnly) {
+                    val abr = f.optInt("abr", 0)
+                    if (abr > 0) "${abr}K" else "Audio"
+                } else {
+                    if (height > 0) "${height}P" + if (height >= 720) " HD" else ""
+                    else "Video"
+                }
+
+                val opt = FormatOption(
+                    id = f.optString("format_id", ""),
+                    label = label,
+                    format = f.optString("ext", "").uppercase(),
+                    sizeLabel = formatBytes(f.optLong("filesize", 0).takeIf { it > 0 }
+                        ?: f.optLong("filesize_approx", 0)),
+                    isAudio = isAudioOnly
+                )
+                if (isAudioOnly) music.add(opt) else video.add(opt)
+            }
+
+            val sortedVideo = video.sortedBy {
+                it.label.filter { c -> c.isDigit() }.toIntOrNull() ?: 0
+            }
+            Result.success(FormatsResult(music = music, video = sortedVideo))
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Resolve a direct playable stream URL for in-app playback (ExoPlayer).
+     */
+    suspend fun resolveStreamUrl(url: String): Result<String?> = withContext(Dispatchers.IO) {
+        try {
+            val request = YoutubeDLRequest(url)
+            request.addOption("-g")
+            request.addOption("-f", "bv*+ba/b")
+            val response = YoutubeDL.getInstance().execute(request, null, null)
+            val streamUrl = response.out.lineSequence().firstOrNull()?.trim()
+            Result.success(streamUrl?.ifEmpty { null })
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Check for yt-dlp updates. Call on app start (background thread).
+     * Returns true if an update was installed.
+     */
+    suspend fun checkForUpdates(): Result<Boolean> = withContext(Dispatchers.IO) {
+        try {
+            val status = YoutubeDL.getInstance()
+                .updateYoutubeDL(null, YoutubeDL.UpdateChannel.STABLE)
+            Result.success(status == YoutubeDL.UpdateStatus.DONE)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    private fun formatViews(count: Long): String = when {
+        count >= 1_000_000 -> "${count / 1_000_000}M"
+        count >= 1_000 -> "${count / 1_000}K"
+        else -> count.toString()
+    }
+
+    private fun formatBytes(bytes: Long): String = when {
+        bytes <= 0 -> ""
+        bytes >= 1_073_741_824 -> "%.1fGB".format(bytes / 1_073_741_824.0)
+        bytes >= 1_048_576 -> "%.1fMB".format(bytes / 1_048_576.0)
+        bytes >= 1024 -> "%.0fKB".format(bytes / 1024.0)
+        else -> "$bytes B"
     }
 
     data class FormatsResult(
         val music: List<FormatOption>,
         val video: List<FormatOption>
     )
-
-    /**
-     * Resolve a direct playable stream URL for in-app playback (ExoPlayer).
-     * TODO: real implementation. Returns null until yt-dlp lands.
-     */
-    suspend fun resolveStreamUrl(url: String): Result<String?> {
-        // TODO: replace with real yt-dlp call
-        return Result.success(null)
-    }
 }
