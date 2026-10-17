@@ -52,6 +52,7 @@ android {
     // Chaquopy: Python for Android — bundles yt-dlp
     chaquopy {
         defaultConfig {
+            version = "3.11"
             // Only arm64 for now (most devices); add armeabi-v7a if needed
             abiFilters("arm64-v8a")
             pip {
