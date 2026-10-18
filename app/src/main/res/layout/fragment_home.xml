@@ -45,7 +45,7 @@
                 android:layout_height="48dp"
                 android:layout_marginStart="8dp"
                 android:background="@drawable/bg_search"
-                android:contentDescription="@string/downloads"
+                android:contentDescription="@string/nav_downloads"
                 android:src="@drawable/ic_download" />
 
             <Button
