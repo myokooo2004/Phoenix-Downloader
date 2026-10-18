@@ -25,6 +25,7 @@ import com.phoenix.downloader.ui.video.VideoOptionsDialogFragment
 class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
+    private var suppressNavListener = false
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -67,6 +68,7 @@ class MainActivity : AppCompatActivity() {
         requestAppPermissions()
 
         binding.bottomNav.setOnItemSelectedListener { item ->
+            if (suppressNavListener) return@setOnItemSelectedListener false
             when (item.itemId) {
                 R.id.nav_home -> {
                     showHome()
@@ -110,17 +112,21 @@ class MainActivity : AppCompatActivity() {
 
     fun showHome() {
         showFragment(HomeFragment(), addToBackStack = false)
-        // Avoid infinite loop: only set if not already selected
+        // Suppress listener to avoid infinite recursion via setSelectedItemId
         if (binding.bottomNav.selectedItemId != R.id.nav_home) {
+            suppressNavListener = true
             binding.bottomNav.selectedItemId = R.id.nav_home
+            suppressNavListener = false
         }
     }
 
     fun showDownloads() {
         showFragment(DownloadsFragment(), addToBackStack = false)
-        // Avoid infinite loop: only set if not already selected
+        // Suppress listener to avoid infinite recursion via setSelectedItemId
         if (binding.bottomNav.selectedItemId != R.id.nav_downloads) {
+            suppressNavListener = true
             binding.bottomNav.selectedItemId = R.id.nav_downloads
+            suppressNavListener = false
         }
     }
 
