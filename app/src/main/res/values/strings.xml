@@ -9,4 +9,6 @@
     <string name="section_music">Audio (MP3)</string>
     <string name="section_video">Video (MP4)</string>
     <string name="fetching_formats">Fetching available formats...</string>
+    <string name="action_watch">Watch</string>
+    <string name="video_detected">Video detected — tap to download</string>
 </resources>

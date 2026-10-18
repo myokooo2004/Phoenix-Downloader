@@ -7,4 +7,10 @@
     <color name="text_secondary">#777777</color>
     <color name="black">#000000</color>
     <color name="white">#FFFFFF</color>
+    <color name="progress_track">#E0E0E0</color>
+    <color name="divider">#E0E0E0</color>
+    <color name="site_youtube">#FF0000</color>
+    <color name="site_facebook">#1877F2</color>
+    <color name="site_tiktok">#000000</color>
+    <color name="link_blue">#1A73E8</color>
 </resources>
