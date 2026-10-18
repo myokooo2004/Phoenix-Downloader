@@ -45,8 +45,14 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        // Initialize yt-dlp (required before any YtDlpManager calls)
-        com.phoenix.downloader.core.YtDlpManager.init(this)
+        // Initialize yt-dlp on background thread (extracts Python env, takes seconds)
+        Thread {
+            try {
+                com.phoenix.downloader.core.YtDlpManager.init(this)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }.start()
 
         requestAppPermissions()
 
