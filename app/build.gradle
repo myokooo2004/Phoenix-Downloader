@@ -17,6 +17,19 @@ android {
         resourceConfigurations += ["en", "my"]
     }
 
+    signingConfigs {
+        create("release") {
+            // Use env vars if provided (CI secrets), otherwise unsigned
+            def keystorePath = System.getenv("KEYSTORE_PATH")
+            if (keystorePath != null) {
+                storeFile = file(keystorePath)
+                storePassword = System.getenv("STORE_PASSWORD")
+                keyAlias = System.getenv("KEY_ALIAS") ?: "upload"
+                keyPassword = System.getenv("KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
             minifyEnabled = false
@@ -24,6 +37,11 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            // Use release signing if keystore is provided, otherwise unsigned
+            def keystorePath = System.getenv("KEYSTORE_PATH")
+            if (keystorePath != null) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
         debug {
             applicationIdSuffix = ".debug"
