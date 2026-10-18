@@ -48,6 +48,8 @@ class BrowserFragment : Fragment() {
         wv.settings.javaScriptEnabled = true
         wv.settings.domStorageEnabled = true
         wv.settings.mediaPlaybackRequiresUserGesture = false
+        // Hide WebView indicator so sites like TikTok don't block/redirect
+        wv.settings.userAgentString = wv.settings.userAgentString.replace("; wv", "")
         // Default TLS handling (no onReceivedSslError override) -> no security errors.
 
         wv.webViewClient = object : WebViewClient() {
