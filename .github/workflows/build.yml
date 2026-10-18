@@ -31,21 +31,24 @@ jobs:
       - name: Make Gradlew Executable
         run: chmod +x gradlew
 
-      - name: Decode keystore (if provided)
+      - name: Decode or generate keystore
         run: |
           if [ -n "${{ secrets.KEYSTORE_BASE64 }}" ]; then
             echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > downloader-release.jks
-            echo "Keystore decoded"
+            echo "Keystore decoded from secret"
           else
-            echo "No keystore secret, building unsigned"
+            echo "No keystore secret, generating new one..."
+            keytool -genkeypair -v -keystore downloader-release.jks -keyalg RSA -keysize 2048 -validity 10000 -alias upload -storepass "phoenix2026" -keypass "phoenix2026" -dname "CN=Phoenix, OU=Downloader, O=Phoenix, L=Yangon, ST=Yangon, C=MM"
+            echo "New keystore generated"
           fi
+          ls -lh downloader-release.jks
 
       - name: Build release APK
         env:
           KEYSTORE_PATH: ${{ github.workspace }}/downloader-release.jks
-          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD || 'phoenix2026' }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS || 'upload' }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD || 'phoenix2026' }}
         run: ./gradlew assembleRelease --no-daemon --stacktrace 2>&1 | tee build.log; test ${PIPESTATUS[0]} -eq 0
 
       - name: Upload build log
