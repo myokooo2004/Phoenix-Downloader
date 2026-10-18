@@ -11,8 +11,10 @@ android {
         applicationId = "com.phoenix.downloader"
         minSdk = 24
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        // Auto-version: BUILD_NUMBER from CI (github.run_number), defaults to 1 locally
+        def buildNum = System.getenv("BUILD_NUMBER")?.toInteger() ?: 1
+        versionCode = buildNum
+        versionName = "1.0.${buildNum}"
         // Keep resource names stable for the bilingual (en + my) builds
         resourceConfigurations += ["en", "my"]
     }

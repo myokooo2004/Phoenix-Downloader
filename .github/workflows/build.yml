@@ -49,6 +49,7 @@ jobs:
           STORE_PASSWORD: ${{ secrets.STORE_PASSWORD || 'phoenix2026' }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS || 'upload' }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD || 'phoenix2026' }}
+          BUILD_NUMBER: ${{ github.run_number }}
         run: ./gradlew assembleRelease --no-daemon --stacktrace 2>&1 | tee build.log; test ${PIPESTATUS[0]} -eq 0
 
       - name: Upload build log
