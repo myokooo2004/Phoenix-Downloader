@@ -61,6 +61,19 @@ class BrowserFragment : Fragment() {
                 binding.tvUrl.text = url
                 checkForVideo(url)
             }
+
+            override fun onPageFinished(view: WebView, url: String) {
+                // SPA sites (YouTube/Facebook) update URL via JS; re-check on finish
+                val currentUrl = view.url ?: url
+                binding.tvUrl.text = currentUrl
+                checkForVideo(currentUrl)
+            }
+
+            override fun doUpdateVisitedHistory(view: WebView, url: String, isReload: Boolean) {
+                // Catches SPA pushState/replaceState navigations
+                binding.tvUrl.text = url
+                checkForVideo(url)
+            }
         }
         wv.webChromeClient = object : WebChromeClient() {
             override fun onProgressChanged(view: WebView, newProgress: Int) {
