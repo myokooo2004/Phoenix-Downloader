@@ -52,6 +52,20 @@ class HomeFragment : Fragment() {
         binding.rvVideos.layoutManager = LinearLayoutManager(requireContext())
         binding.rvVideos.adapter = adapter
 
+        // Hide search bar on scroll up, show on scroll down (Vidmate-style)
+        binding.rvVideos.addOnScrollListener(object : androidx.recyclerview.widget.RecyclerView.OnScrollListener() {
+            override fun onScrolled(recyclerView: androidx.recyclerview.widget.RecyclerView, dx: Int, dy: Int) {
+                super.onScrolled(recyclerView, dx, dy)
+                if (dy > 10) {
+                    // Scrolling up -> hide search bar
+                    binding.searchBarContainer.animate().translationY(-binding.searchBarContainer.height.toFloat()).setDuration(200).start()
+                } else if (dy < -10) {
+                    // Scrolling down -> show search bar
+                    binding.searchBarContainer.animate().translationY(0f).setDuration(200).start()
+                }
+            }
+        })
+
         binding.etSearch.setOnEditorActionListener { v, actionId, _ ->
             if (actionId == EditorInfo.IME_ACTION_SEARCH) {
                 handleInput(v.text.toString())
