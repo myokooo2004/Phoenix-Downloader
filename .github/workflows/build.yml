@@ -31,6 +31,22 @@ jobs:
       - name: Make Gradlew Executable
         run: chmod +x gradlew
 
+      - name: Bundle latest yt-dlp (override library's old version)
+        run: |
+          # Download latest yt-dlp release
+          YTDLP_VER=$(curl -s https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest | grep '"tag_name"' | cut -d'"' -f4)
+          echo "Latest yt-dlp: $YTDLP_VER"
+          curl -sL "https://github.com/yt-dlp/yt-dlp/archive/refs/tags/${YTDLP_VER}.zip" -o /tmp/ytdlp.zip
+          rm -rf /tmp/ytdlp_src && mkdir -p /tmp/ytdlp_src
+          unzip -q /tmp/ytdlp.zip -d /tmp/ytdlp_src
+          cd /tmp/ytdlp_src/yt-dlp-*
+          # Create zip with yt_dlp/ directory (library expects this format)
+          zip -qr /tmp/ytdlp_new.zip yt_dlp
+          # Prepend Python shebang (23 bytes) like the library's bundled file
+          printf '#!/usr/bin/env python3\n' | cat - /tmp/ytdlp_new.zip > "${{ github.workspace }}/app/src/main/res/raw/ytdlp"
+          ls -lh "${{ github.workspace }}/app/src/main/res/raw/ytdlp"
+          echo "Bundled yt-dlp $YTDLP_VER"
+
       - name: Decode or generate keystore
         run: |
           if [ -n "${{ secrets.KEYSTORE_BASE64 }}" ]; then
