@@ -59,6 +59,19 @@ jobs:
           path: build.log
           retention-days: 7
 
+      - name: Rename APKs
+        run: |
+          cd app/build/outputs/apk/release/
+          ls -lh *.apk
+          # Rename to user-friendly names: v8 for arm64-v8a, v7 for armeabi-v7a
+          for f in *arm64-v8a*.apk; do
+            [ -f "$f" ] && mv "$f" "Phoenix-downloader-v8.apk" && echo "Renamed $f -> Phoenix-downloader-v8.apk"
+          done
+          for f in *armeabi-v7a*.apk; do
+            [ -f "$f" ] && mv "$f" "Phoenix-downloader-v7.apk" && echo "Renamed $f -> Phoenix-downloader-v7.apk"
+          done
+          ls -lh *.apk
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
