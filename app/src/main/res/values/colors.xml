@@ -1,19 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- App color palette -->
-    <color name="red_accent">#E53935</color>
-    <color name="red_dark">#C62828</color>
-    <color name="bg">#F5F5F5</color>
+    <color name="red_accent">#E62117</color>
+    <color name="bg">#F8F8F8</color>
     <color name="card">#FFFFFF</color>
     <color name="text_primary">#1A1A1A</color>
     <color name="text_secondary">#777777</color>
-    <color name="text_hint">#AAAAAA</color>
-    <color name="divider">#EEEEEE</color>
-    <color name="link_blue">#2196F3</color>
-    <color name="site_youtube">#FF0000</color>
-    <color name="site_facebook">#1877F2</color>
-    <color name="site_tiktok">#111111</color>
-    <color name="progress_track">#E0E0E0</color>
     <color name="black">#000000</color>
     <color name="white">#FFFFFF</color>
 </resources>
