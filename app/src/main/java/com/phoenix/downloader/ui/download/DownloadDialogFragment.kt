@@ -56,7 +56,7 @@ class DownloadDialogFragment : BottomSheetDialogFragment() {
         binding.rvVideo.layoutManager = GridLayoutManager(requireContext(), 2)
         binding.tvFetching.isVisible = true
 
-        lifecycleScope.launch {
+        viewLifecycleOwner.lifecycleScope.launch {
             val result = YtDlpManager.fetchFormats(videoUrl)
             binding.tvFetching.isVisible = false
             result.onSuccess { formats ->

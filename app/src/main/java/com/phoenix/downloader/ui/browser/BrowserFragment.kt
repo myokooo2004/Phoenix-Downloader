@@ -57,15 +57,17 @@ class BrowserFragment : Fragment() {
             @android.webkit.JavascriptInterface
             fun onDownloadClick(videoUrl: String) {
                 activity?.runOnUiThread {
-                    lifecycleScope.launch {
+                    viewLifecycleOwner.lifecycleScope.launch {
                         YtDlpManager.fetchVideoInfo(videoUrl)
                             .onSuccess { (activity as? MainActivity)?.openDownloadDialog(it.url, it.title) }
                             .onFailure { 
-                                android.widget.Toast.makeText(
-                                    requireContext(), 
-                                    it.message ?: "Could not fetch video", 
-                                    android.widget.Toast.LENGTH_SHORT
-                                ).show()
+                                context?.let { ctx ->
+                                    android.widget.Toast.makeText(
+                                        ctx, 
+                                        it.message ?: "Could not fetch video", 
+                                        android.widget.Toast.LENGTH_SHORT
+                                    ).show()
+                                }
                             }
                     }
                 }
@@ -120,7 +122,7 @@ class BrowserFragment : Fragment() {
 
         binding.fabDownload.setOnClickListener {
             val url = pendingVideoUrl ?: return@setOnClickListener
-            lifecycleScope.launch {
+            viewLifecycleOwner.lifecycleScope.launch {
                 YtDlpManager.fetchVideoInfo(url)
                     .onSuccess { (activity as? MainActivity)?.openDownloadDialog(it.url, it.title) }
             }

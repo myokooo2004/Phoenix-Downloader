@@ -153,7 +153,7 @@ class HomeFragment : Fragment() {
 
     private fun fetchAndShowVideo(url: String) {
         Toast.makeText(requireContext(), R.string.loading, Toast.LENGTH_SHORT).show()
-        lifecycleScope.launch {
+        viewLifecycleOwner.lifecycleScope.launch {
             YtDlpManager.fetchVideoInfo(url)
                 .onSuccess { info ->
                     videos.removeAll { it.url == info.url }

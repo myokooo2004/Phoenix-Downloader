@@ -60,7 +60,7 @@ class PlayerFragment : Fragment() {
     private fun resolveAndPlay(videoUrl: String) {
         binding.tvPlayerStatus.isVisible = true
         binding.tvPlayerStatus.text = getString(R.string.loading)
-        lifecycleScope.launch {
+        viewLifecycleOwner.lifecycleScope.launch {
             val streamUrl = YtDlpManager.resolveStreamUrl(videoUrl).getOrNull()
             if (streamUrl.isNullOrEmpty()) {
                 // Scaffold: no binary yet, so no real stream URL.
