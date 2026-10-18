@@ -33,8 +33,12 @@ jobs:
 
       - name: Bundle latest yt-dlp (override library's old version)
         run: |
-          # Download latest yt-dlp release
+          # Download latest yt-dlp release (with fallback)
           YTDLP_VER=$(curl -s https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest | grep '"tag_name"' | cut -d'"' -f4)
+          if [ -z "$YTDLP_VER" ]; then
+            echo "GitHub API failed, using fallback version"
+            YTDLP_VER="2026.08.19"
+          fi
           echo "Latest yt-dlp: $YTDLP_VER"
           curl -sL "https://github.com/yt-dlp/yt-dlp/archive/refs/tags/${YTDLP_VER}.zip" -o /tmp/ytdlp.zip
           rm -rf /tmp/ytdlp_src && mkdir -p /tmp/ytdlp_src
