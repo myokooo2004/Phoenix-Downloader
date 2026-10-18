@@ -31,6 +31,16 @@ class MainActivity : AppCompatActivity() {
     ) { /* granted or not — app continues, features degrade gracefully */ }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Apply saved language before super.onCreate
+        val prefs = getSharedPreferences("app_prefs", MODE_PRIVATE)
+        val lang = prefs.getString("language", "en") ?: "en"
+        val locale = java.util.Locale(lang)
+        java.util.Locale.setDefault(locale)
+        val config = resources.configuration
+        config.setLocale(locale)
+        @Suppress("DEPRECATION")
+        resources.updateConfiguration(config, resources.displayMetrics)
+
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)

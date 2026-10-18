@@ -62,6 +62,11 @@ class HomeFragment : Fragment() {
             (activity as? MainActivity)?.showDownloads()
         }
 
+        binding.btnLanguage.setOnClickListener {
+            toggleLanguage()
+        }
+        updateLangLabel()
+
         binding.siteYoutube.setOnClickListener {
             (activity as? MainActivity)?.openBrowser("https://www.youtube.com")
         }
@@ -127,6 +132,32 @@ class HomeFragment : Fragment() {
                     Toast.makeText(requireContext(), R.string.invalid_link, Toast.LENGTH_LONG).show()
                 }
         }
+    }
+
+    /** Toggle between English and Myanmar, then recreate activity. */
+    private fun toggleLanguage() {
+        val prefs = requireContext().getSharedPreferences("app_prefs", android.content.Context.MODE_PRIVATE)
+        val current = prefs.getString("language", "en") ?: "en"
+        val newLang = if (current == "en") "my" else "en"
+        prefs.edit().putString("language", newLang).apply()
+
+        // Apply the new locale
+        val locale = java.util.Locale(newLang)
+        java.util.Locale.setDefault(locale)
+        val config = resources.configuration
+        config.setLocale(locale)
+        @Suppress("DEPRECATION")
+        resources.updateConfiguration(config, resources.displayMetrics)
+
+        // Recreate to apply
+        requireActivity().recreate()
+    }
+
+    /** Update the language button label (မြ for Myanmar, EN for English). */
+    private fun updateLangLabel() {
+        val prefs = requireContext().getSharedPreferences("app_prefs", android.content.Context.MODE_PRIVATE)
+        val current = prefs.getString("language", "en") ?: "en"
+        binding.tvLangLabel.text = if (current == "en") "မြ" else "EN"
     }
 
     override fun onDestroyView() {
