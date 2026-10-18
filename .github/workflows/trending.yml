@@ -1,0 +1,84 @@
+name: Update Trending Videos
+
+on:
+  schedule:
+    # Daily at 00:00 UTC (06:30 Myanmar)
+    - cron: '0 0 * * *'
+  workflow_dispatch: # Manual trigger
+
+jobs:
+  update-trending:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install yt-dlp
+        run: |
+          sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp
+          sudo chmod +x /usr/local/bin/yt-dlp
+          yt-dlp --version
+
+      - name: Fetch YouTube trending
+        run: |
+          python3 << 'PYEOF'
+          import json
+          import subprocess
+
+          # Fetch trending with yt-dlp
+          result = subprocess.run(
+              ['yt-dlp', '--flat-playlist', '--dump-json', '--no-download',
+               '--playlist-end', '30', 'https://www.youtube.com/feed/trending'],
+              capture_output=True, text=True, timeout=120
+          )
+
+          videos = []
+          for line in result.stdout.strip().split('\n'):
+              if not line.strip():
+                  continue
+              try:
+                  data = json.loads(line)
+                  video_id = data.get('id', '')
+                  if not video_id:
+                      continue
+
+                  # Get best thumbnail
+                  thumbnails = data.get('thumbnails', [])
+                  thumb_url = thumbnails[-1]['url'] if thumbnails else None
+
+                  videos.append({
+                      'url': f'https://www.youtube.com/watch?v={video_id}',
+                      'title': data.get('title', ''),
+                      'uploader': data.get('uploader', ''),
+                      'duration': data.get('duration', 0),
+                      'viewCount': data.get('view_count', 0),
+                      'thumbnailUrl': thumb_url,
+                  })
+
+                  if len(videos) >= 20:
+                      break
+              except:
+                  continue
+
+          # Save to trending.json
+          output = {
+              'updated': __import__('datetime').datetime.utcnow().isoformat() + 'Z',
+              'videos': videos
+          }
+
+          with open('trending.json', 'w', encoding='utf-8') as f:
+              json.dump(output, f, ensure_ascii=False, indent=2)
+
+          print(f"Saved {len(videos)} trending videos")
+          PYEOF
+
+      - name: Commit and push
+        run: |
+          git config user.name "Bumblemuse"
+          git config user.email "bumblemuse@local"
+          git add trending.json
+          git diff --staged --quiet || git commit -m "Update trending videos"
+          git push

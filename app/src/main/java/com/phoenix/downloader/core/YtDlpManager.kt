@@ -146,10 +146,48 @@ object YtDlpManager {
     }
 
     /**
-     * Fetch YouTube trending videos for the home feed.
-     * Uses --flat-playlist to get the list without downloading.
+     * Fetch trending videos from GitHub (pre-fetched by daily workflow).
+     * Fast - just a simple HTTP GET, no on-device yt-dlp needed.
+     * Falls back to on-device yt-dlp if the fetch fails.
      */
     suspend fun fetchTrending(): Result<List<VideoInfo>> = withContext(Dispatchers.IO) {
+        try {
+            // Try GitHub-hosted trending.json first (fast)
+            val url = java.net.URL("https://raw.githubusercontent.com/myokooo2004/Phoenix-Downloader/main/trending.json")
+            val connection = url.openConnection() as java.net.HttpURLConnection
+            connection.connectTimeout = 10000
+            connection.readTimeout = 10000
+            connection.requestMethod = "GET"
+
+            if (connection.responseCode == 200) {
+                val jsonText = connection.inputStream.bufferedReader().readText()
+                val json = org.json.JSONObject(jsonText)
+                val videosArray = json.optJSONArray("videos") ?: org.json.JSONArray()
+
+                val videos = mutableListOf<VideoInfo>()
+                for (i in 0 until videosArray.length()) {
+                    val item = videosArray.getJSONObject(i)
+                    videos.add(
+                        VideoInfo(
+                            url = item.optString("url", ""),
+                            title = item.optString("title", ""),
+                            uploader = item.optString("uploader", ""),
+                            durationSec = item.optLong("duration", 0),
+                            viewCount = formatViews(item.optLong("viewCount", 0)),
+                            thumbnailUrl = item.optString("thumbnailUrl", "").ifEmpty { null }
+                        )
+                    )
+                }
+
+                if (videos.isNotEmpty()) {
+                    return@withContext Result.success(videos)
+                }
+            }
+        } catch (e: Exception) {
+            // Fall through to on-device fetch
+        }
+
+        // Fallback: on-device yt-dlp (slow, but works offline from GitHub)
         try {
             if (!initialized) return@withContext Result.failure(Exception("yt-dlp not initialized yet, please wait"))
             val request = YoutubeDLRequest("https://www.youtube.com/feed/trending")
