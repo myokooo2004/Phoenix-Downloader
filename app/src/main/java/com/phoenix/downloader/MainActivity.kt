@@ -14,8 +14,11 @@ import com.phoenix.downloader.ui.player.PlayerFragment
 
 class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
+    private var suppressNavListener = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Crash logger first (catches everything after this point)
+        com.phoenix.downloader.core.CrashLogger.init(this)
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
@@ -24,6 +27,7 @@ class MainActivity : AppCompatActivity() {
         if (savedInstanceState == null) showHome()
 
         binding.bottomNav.setOnItemSelectedListener { item ->
+            if (suppressNavListener) return@setOnItemSelectedListener false
             when (item.itemId) {
                 R.id.nav_home -> { showHome(); true }
                 R.id.nav_downloads -> { showDownloads(); true }
@@ -34,15 +38,32 @@ class MainActivity : AppCompatActivity() {
 
     fun showHome() {
         supportFragmentManager.beginTransaction().replace(R.id.nav_host, HomeFragment()).commit()
+        if (binding.bottomNav.selectedItemId != R.id.nav_home) {
+            suppressNavListener = true
+            binding.bottomNav.selectedItemId = R.id.nav_home
+            suppressNavListener = false
+        }
     }
 
     fun showDownloads() {
         supportFragmentManager.beginTransaction().replace(R.id.nav_host, DownloadsFragment()).commit()
+        if (binding.bottomNav.selectedItemId != R.id.nav_downloads) {
+            suppressNavListener = true
+            binding.bottomNav.selectedItemId = R.id.nav_downloads
+            suppressNavListener = false
+        }
     }
 
     fun openPlayer(url: String, title: String) {
         supportFragmentManager.beginTransaction()
             .replace(R.id.nav_host, PlayerFragment.newInstance(url, title))
+            .addToBackStack(null)
+            .commit()
+    }
+
+    fun openBrowser(url: String) {
+        supportFragmentManager.beginTransaction()
+            .replace(R.id.nav_host, com.phoenix.downloader.ui.browser.BrowserFragment.newInstance(url))
             .addToBackStack(null)
             .commit()
     }
