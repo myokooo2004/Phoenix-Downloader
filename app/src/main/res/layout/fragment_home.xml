@@ -122,8 +122,8 @@
                 android:gravity="center">
 
                 <FrameLayout
-                    android:layout_width="58dp"
-                    android:layout_height="58dp"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
                     android:background="@drawable/bg_site_youtube">
                     <TextView
                         android:layout_width="wrap_content"
@@ -131,7 +131,7 @@
                         android:layout_gravity="center"
                         android:text="▶"
                         android:textColor="@color/white"
-                        android:textSize="24sp"
+                        android:textSize="20sp"
                         android:textStyle="bold" />
                 </FrameLayout>
                 <TextView
@@ -140,7 +140,7 @@
                     android:layout_marginTop="6dp"
                     android:text="@string/site_youtube"
                     android:textColor="@color/text_secondary"
-                    android:textSize="13sp" />
+                    android:textSize="12sp" />
             </LinearLayout>
 
             <LinearLayout
@@ -152,8 +152,8 @@
                 android:gravity="center">
 
                 <FrameLayout
-                    android:layout_width="58dp"
-                    android:layout_height="58dp"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
                     android:background="@drawable/bg_site_facebook">
                     <TextView
                         android:layout_width="wrap_content"
@@ -161,7 +161,7 @@
                         android:layout_gravity="center"
                         android:text="f"
                         android:textColor="@color/white"
-                        android:textSize="28sp"
+                        android:textSize="20sp"
                         android:textStyle="bold" />
                 </FrameLayout>
                 <TextView
@@ -170,7 +170,7 @@
                     android:layout_marginTop="6dp"
                     android:text="@string/site_facebook"
                     android:textColor="@color/text_secondary"
-                    android:textSize="13sp" />
+                    android:textSize="12sp" />
             </LinearLayout>
 
             <LinearLayout
@@ -182,8 +182,8 @@
                 android:gravity="center">
 
                 <FrameLayout
-                    android:layout_width="58dp"
-                    android:layout_height="58dp"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
                     android:background="@drawable/bg_site_tiktok">
                     <TextView
                         android:layout_width="wrap_content"
@@ -191,7 +191,7 @@
                         android:layout_gravity="center"
                         android:text="♪"
                         android:textColor="@color/white"
-                        android:textSize="26sp"
+                        android:textSize="20sp"
                         android:textStyle="bold" />
                 </FrameLayout>
                 <TextView
@@ -200,7 +200,7 @@
                     android:layout_marginTop="6dp"
                     android:text="@string/site_tiktok"
                     android:textColor="@color/text_secondary"
-                    android:textSize="13sp" />
+                    android:textSize="12sp" />
             </LinearLayout>
         </LinearLayout>
 
