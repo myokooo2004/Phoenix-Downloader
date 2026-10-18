@@ -167,11 +167,11 @@ class HomeFragment : Fragment() {
         requireActivity().recreate()
     }
 
-    /** Update the language button label (မြ for Myanmar, EN for English). */
+    /** Update the language button label (မြန် for Myanmar, EN for English). */
     private fun updateLangLabel() {
         val prefs = requireContext().getSharedPreferences("app_prefs", android.content.Context.MODE_PRIVATE)
         val current = prefs.getString("language", "en") ?: "en"
-        binding.tvLangLabel.text = if (current == "en") "မြ" else "EN"
+        binding.tvLangLabel.text = if (current == "en") "မြန်" else "EN"
     }
 
     override fun onDestroyView() {

@@ -97,7 +97,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_gravity="center"
-                    android:text="မြ"
+                    android:text="မြန်"
                     android:textColor="@color/red_accent"
                     android:textSize="16sp"
                     android:textStyle="bold" />
