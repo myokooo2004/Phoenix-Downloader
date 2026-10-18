@@ -44,6 +44,7 @@ class DownloadsFragment : Fragment() {
             onActionClick = ::onActionClick,
             onMoreClick = ::onMoreClick
         )
+        binding.rvDownloads.layoutManager = androidx.recyclerview.widget.LinearLayoutManager(requireContext())
         binding.rvDownloads.adapter = adapter
 
         binding.tabAll.setOnClickListener { setFilter(Filter.ALL) }

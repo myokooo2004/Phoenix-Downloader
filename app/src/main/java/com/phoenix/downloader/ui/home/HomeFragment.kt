@@ -74,6 +74,24 @@ class HomeFragment : Fragment() {
 
         // Deep link / shared text entry point
         arguments?.getString(ARG_SHARED_TEXT)?.let { handleInput(it) }
+
+        // Load YouTube trending on launch (Vidmate-style home feed)
+        loadTrending()
+    }
+
+    /** Load YouTube trending videos into the home feed. */
+    private fun loadTrending() {
+        viewLifecycleOwner.lifecycleScope.launch {
+            YtDlpManager.fetchTrending()
+                .onSuccess { trending ->
+                    videos.clear()
+                    videos.addAll(trending)
+                    adapter.submitList(videos.toList())
+                }
+                .onFailure {
+                    // Silently fail - user can still search/browse
+                }
+        }
     }
 
     /** Entry point for pasted or shared text. */

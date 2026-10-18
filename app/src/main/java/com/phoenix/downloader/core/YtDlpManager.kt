@@ -140,6 +140,51 @@ object YtDlpManager {
         }
     }
 
+    /**
+     * Fetch YouTube trending videos for the home feed.
+     * Uses --flat-playlist to get the list without downloading.
+     */
+    suspend fun fetchTrending(): Result<List<VideoInfo>> = withContext(Dispatchers.IO) {
+        try {
+            val request = YoutubeDLRequest("https://www.youtube.com/feed/trending")
+            request.addOption("--flat-playlist")
+            request.addOption("--dump-json")
+            request.addOption("--no-download")
+            val response = YoutubeDL.getInstance().execute(request)
+
+            val videos = mutableListOf<VideoInfo>()
+            // --flat-playlist outputs one JSON object per line
+            response.out.lines().forEach { line ->
+                if (line.isBlank()) return@forEach
+                try {
+                    val json = org.json.JSONObject(line)
+                    val videoId = json.optString("id", "")
+                    if (videoId.isNotEmpty()) {
+                        videos.add(
+                            VideoInfo(
+                                url = "https://www.youtube.com/watch?v=$videoId",
+                                title = json.optString("title", ""),
+                                uploader = json.optString("uploader", ""),
+                                durationSec = json.optLong("duration", 0),
+                                viewCount = formatViews(json.optLong("view_count", 0)),
+                                thumbnailUrl = json.optJSONArray("thumbnails")?.let { arr ->
+                                    if (arr.length() > 0) arr.getJSONObject(arr.length() - 1).optString("url", "").ifEmpty { null }
+                                    else null
+                                }
+                            )
+                        )
+                    }
+                    if (videos.size >= 20) return@forEach // Limit to 20
+                } catch (e: Exception) {
+                    // Skip malformed lines
+                }
+            }
+            Result.success(videos)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     private fun formatViews(count: Long): String = when {
         count >= 1_000_000 -> "${count / 1_000_000}M"
         count >= 1_000 -> "${count / 1_000}K"
