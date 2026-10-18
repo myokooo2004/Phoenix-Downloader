@@ -49,6 +49,10 @@ class MainActivity : AppCompatActivity() {
         Thread {
             try {
                 com.phoenix.downloader.core.YtDlpManager.init(this)
+                // Check for yt-dlp updates after init (fixes YouTube compatibility)
+                kotlinx.coroutines.runBlocking {
+                    com.phoenix.downloader.core.YtDlpManager.checkForUpdates()
+                }
             } catch (e: Exception) {
                 e.printStackTrace()
             }
