@@ -79,6 +79,18 @@ class HomeFragment : Fragment() {
         binding.btnLanguage.setOnClickListener {
             toggleLanguage()
         }
+        // Long-press language button: copy crash log to clipboard
+        binding.btnLanguage.setOnLongClickListener {
+            val log = com.phoenix.downloader.core.CrashLogger.getLog(requireContext())
+            if (log != null) {
+                val clipboard = requireContext().getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                clipboard.setPrimaryClip(android.content.ClipData.newPlainText("crash_log", log))
+                android.widget.Toast.makeText(requireContext(), "Crash log copied", android.widget.Toast.LENGTH_SHORT).show()
+            } else {
+                android.widget.Toast.makeText(requireContext(), "No crashes logged", android.widget.Toast.LENGTH_SHORT).show()
+            }
+            true
+        }
         updateLangLabel()
 
         binding.siteYoutube.setOnClickListener {

@@ -31,6 +31,9 @@ class MainActivity : AppCompatActivity() {
     ) { /* granted or not — app continues, features degrade gracefully */ }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Crash logger first (catches everything after this point)
+        com.phoenix.downloader.core.CrashLogger.init(this)
+
         // Apply saved language before super.onCreate
         val prefs = getSharedPreferences("app_prefs", MODE_PRIVATE)
         val lang = prefs.getString("language", "en") ?: "en"
