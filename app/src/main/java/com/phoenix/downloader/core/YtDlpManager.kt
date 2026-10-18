@@ -51,6 +51,13 @@ object YtDlpManager {
             request.addOption("Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36")
             request.addOption("--socket-timeout")
             request.addOption("30")
+            // Use browser cookies to bypass bot detection (from Python file insight)
+            appContext?.let { ctx ->
+                CookieHelper.getCookieFilePath(ctx)?.let { cookiePath ->
+                    request.addOption("--cookies")
+                    request.addOption(cookiePath)
+                }
+            }
             val response = YoutubeDL.getInstance().execute(request)
             val json = org.json.JSONObject(response.out)
 
@@ -86,6 +93,13 @@ object YtDlpManager {
             request.addOption("3")
             request.addOption("--socket-timeout")
             request.addOption("30")
+            // Use browser cookies to bypass bot detection
+            appContext?.let { ctx ->
+                CookieHelper.getCookieFilePath(ctx)?.let { cookiePath ->
+                    request.addOption("--cookies")
+                    request.addOption(cookiePath)
+                }
+            }
             val response = YoutubeDL.getInstance().execute(request)
             val json = org.json.JSONObject(response.out)
 
@@ -145,6 +159,13 @@ object YtDlpManager {
             request.addOption("Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36")
             request.addOption("--socket-timeout")
             request.addOption("30")
+            // Use browser cookies to bypass bot detection
+            appContext?.let { ctx ->
+                CookieHelper.getCookieFilePath(ctx)?.let { cookiePath ->
+                    request.addOption("--cookies")
+                    request.addOption(cookiePath)
+                }
+            }
             val response = YoutubeDL.getInstance().execute(request)
             val streamUrl = response.out.lineSequence().firstOrNull()?.trim()
             Result.success(streamUrl?.ifEmpty { null })

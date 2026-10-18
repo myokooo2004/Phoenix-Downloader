@@ -87,6 +87,12 @@ class BrowserFragment : Fragment() {
                 val currentUrl = view.url ?: url
                 binding.tvUrl.text = currentUrl
                 checkForVideo(currentUrl)
+                // Save cookies for yt-dlp bot bypass (from Python file insight)
+                try {
+                    com.phoenix.downloader.core.CookieHelper.saveCookiesForUrl(
+                        requireContext(), currentUrl
+                    )
+                } catch (e: Exception) { /* ignore */ }
                 // Inject Vidmate-style per-video download buttons
                 injectDownloadButtons(view)
             }
