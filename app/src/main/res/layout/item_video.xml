@@ -3,11 +3,11 @@
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="vertical"
-    android:paddingBottom="10dp">
+    android:paddingBottom="8dp">
 
     <FrameLayout
         android:layout_width="match_parent"
-        android:layout_height="200dp"
+        android:layout_height="180dp"
         android:background="@drawable/bg_thumb">
 
         <!-- Thumbnail placeholder (loaded via image loader later) -->
@@ -67,25 +67,25 @@
         android:gravity="center_vertical"
         android:paddingStart="4dp"
         android:paddingEnd="4dp"
-        android:paddingTop="10dp">
+        android:paddingTop="8dp">
 
         <FrameLayout
-            android:layout_width="40dp"
-            android:layout_height="40dp"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
             android:background="@drawable/bg_avatar">
             <TextView
                 android:id="@+id/tv_avatar"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_gravity="center"
-                android:textSize="18sp" />
+                android:textSize="16sp" />
         </FrameLayout>
 
         <LinearLayout
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:layout_marginStart="12dp"
+            android:layout_marginStart="10dp"
             android:orientation="vertical">
 
             <TextView
@@ -93,19 +93,19 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:textColor="@color/text_primary"
-                android:textSize="14sp"
+                android:textSize="13sp"
                 android:textStyle="bold"
                 android:maxLines="2"
                 android:ellipsize="end"
-                android:lineSpacingExtra="2dp" />
+                android:lineSpacingExtra="1dp" />
 
             <TextView
                 android:id="@+id/tv_subtitle"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="5dp"
+                android:layout_marginTop="3dp"
                 android:textColor="@color/text_secondary"
-                android:textSize="13sp"
+                android:textSize="12sp"
                 android:maxLines="1"
                 android:ellipsize="end" />
         </LinearLayout>

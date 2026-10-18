@@ -101,6 +101,13 @@ class HomeFragment : Fragment() {
     /** Load YouTube trending videos into the home feed. */
     private fun loadTrending() {
         viewLifecycleOwner.lifecycleScope.launch {
+            // Wait for YtDlp to initialize (max 10 seconds)
+            var attempts = 0
+            while (!YtDlpManager.isInitialized() && attempts < 20) {
+                kotlinx.coroutines.delay(500)
+                attempts++
+            }
+
             YtDlpManager.fetchTrending()
                 .onSuccess { trending ->
                     videos.clear()

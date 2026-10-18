@@ -31,9 +31,12 @@ object YtDlpManager {
         }
     }
 
+    fun isInitialized(): Boolean = initialized
+
     /** Step 1: resolve a video URL to its info (thumbnail, title, duration). */
     suspend fun fetchVideoInfo(url: String): Result<VideoInfo> = withContext(Dispatchers.IO) {
         try {
+            if (!initialized) return@withContext Result.failure(Exception("yt-dlp not initialized yet, please wait"))
             val request = YoutubeDLRequest(url)
             request.addOption("--dump-json")
             request.addOption("--no-download")
@@ -61,6 +64,7 @@ object YtDlpManager {
      */
     suspend fun fetchFormats(url: String): Result<FormatsResult> = withContext(Dispatchers.IO) {
         try {
+            if (!initialized) return@withContext Result.failure(Exception("yt-dlp not initialized yet, please wait"))
             val request = YoutubeDLRequest(url)
             request.addOption("--dump-json")
             request.addOption("--no-download")
@@ -113,6 +117,7 @@ object YtDlpManager {
      */
     suspend fun resolveStreamUrl(url: String): Result<String?> = withContext(Dispatchers.IO) {
         try {
+            if (!initialized) return@withContext Result.failure(Exception("yt-dlp not initialized yet, please wait"))
             val request = YoutubeDLRequest(url)
             request.addOption("-g")
             request.addOption("-f")
@@ -146,6 +151,7 @@ object YtDlpManager {
      */
     suspend fun fetchTrending(): Result<List<VideoInfo>> = withContext(Dispatchers.IO) {
         try {
+            if (!initialized) return@withContext Result.failure(Exception("yt-dlp not initialized yet, please wait"))
             val request = YoutubeDLRequest("https://www.youtube.com/feed/trending")
             request.addOption("--flat-playlist")
             request.addOption("--dump-json")
