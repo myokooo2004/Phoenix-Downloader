@@ -2,68 +2,46 @@
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:background="@color/black">
+    android:background="@color/black"
+    android:orientation="vertical">
 
-    <!-- Top bar -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="horizontal"
         android:gravity="center_vertical"
+        android:orientation="horizontal"
         android:padding="8dp">
 
-        <ImageView
+        <TextView
             android:id="@+id/btn_player_back"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
             android:padding="10dp"
-            android:src="@drawable/ic_back"
-            android:tint="@color/white" />
+            android:text="Back"
+            android:textColor="@color/white" />
 
         <TextView
             android:id="@+id/tv_player_title"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:textColor="@color/white"
-            android:textSize="15sp"
-            android:textStyle="bold"
+            android:ellipsize="end"
             android:maxLines="1"
-            android:ellipsize="end" />
+            android:textColor="@color/white" />
     </LinearLayout>
 
-    <!-- ExoPlayer view: plays streams AND local 4K MP4 files -->
     <androidx.media3.ui.PlayerView
         android:id="@+id/player_view"
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="1"
-        android:background="@color/black" />
+        android:layout_weight="1" />
 
-    <!-- Status / error line -->
-    <TextView
-        android:id="@+id/tv_player_status"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:gravity="center"
-        android:padding="10dp"
-        android:textColor="#AAAAAA"
-        android:textSize="13sp"
-        android:visibility="gone" />
-
-    <!-- Download button (stream mode only; hidden for local files) -->
     <Button
         android:id="@+id/btn_player_download"
         android:layout_width="match_parent"
         android:layout_height="52dp"
         android:layout_margin="16dp"
         android:background="@drawable/bg_btn_download"
-        android:drawableStart="@drawable/ic_download_white"
-        android:drawablePadding="10dp"
-        android:gravity="center"
         android:text="@string/download"
-        android:textColor="@color/white"
-        android:textSize="16sp"
-        android:textStyle="bold" />
+        android:textColor="@color/white" />
 </LinearLayout>
