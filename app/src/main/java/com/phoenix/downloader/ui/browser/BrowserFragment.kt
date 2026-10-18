@@ -42,7 +42,7 @@ class BrowserFragment : Fragment() {
         return binding.root
     }
 
-    @SuppressLint("SetJavaScriptEnabled")
+    @SuppressLint("SetJavaScriptEnabled", "AddJavascriptInterface")
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         val wv = binding.webview
         wv.settings.javaScriptEnabled = true
@@ -51,6 +51,26 @@ class BrowserFragment : Fragment() {
         // Hide WebView indicator so sites like TikTok don't block/redirect
         wv.settings.userAgentString = wv.settings.userAgentString.replace("; wv", "")
         // Default TLS handling (no onReceivedSslError override) -> no security errors.
+
+        // JavaScript bridge for per-video download buttons (Vidmate-style)
+        wv.addJavascriptInterface(object {
+            @android.webkit.JavascriptInterface
+            fun onDownloadClick(videoUrl: String) {
+                activity?.runOnUiThread {
+                    lifecycleScope.launch {
+                        YtDlpManager.fetchVideoInfo(videoUrl)
+                            .onSuccess { (activity as? MainActivity)?.openDownloadDialog(it.url, it.title) }
+                            .onFailure { 
+                                android.widget.Toast.makeText(
+                                    requireContext(), 
+                                    it.message ?: "Could not fetch video", 
+                                    android.widget.Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                    }
+                }
+            }
+        }, "PhoenixDownloader")
 
         wv.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
@@ -67,6 +87,8 @@ class BrowserFragment : Fragment() {
                 val currentUrl = view.url ?: url
                 binding.tvUrl.text = currentUrl
                 checkForVideo(currentUrl)
+                // Inject Vidmate-style per-video download buttons
+                injectDownloadButtons(view)
             }
 
             override fun doUpdateVisitedHistory(view: WebView, url: String, isReload: Boolean) {
@@ -111,6 +133,55 @@ class BrowserFragment : Fragment() {
         pendingVideoUrl = if (site != null) url else null
         binding.fabDownload.isVisible = pendingVideoUrl != null
         binding.tvDetectHint.isVisible = pendingVideoUrl != null
+    }
+
+    /** Inject Vidmate-style download buttons next to videos in list pages */
+    private fun injectDownloadButtons(webView: WebView) {
+        val js = """
+            (function() {
+                // Avoid duplicate injection
+                if (window._phoenixInjected) return;
+                window._phoenixInjected = true;
+                
+                function addButtons() {
+                    // YouTube: video links in lists
+                    var links = document.querySelectorAll('a[href*="/watch?v="]:not([data-phoenix-btn])');
+                    links.forEach(function(link) {
+                        link.setAttribute('data-phoenix-btn', '1');
+                        var href = link.getAttribute('href');
+                        if (!href) return;
+                        var fullUrl = href.startsWith('http') ? href : 'https://www.youtube.com' + href;
+                        
+                        // Create download button
+                        var btn = document.createElement('div');
+                        btn.innerHTML = '⬇';
+                        btn.style.cssText = 'position:absolute;top:4px;right:4px;width:32px;height:32px;' +
+                            'background:#e53935;color:white;border-radius:50%;display:flex;' +
+                            'align-items:center;justify-content:center;font-size:18px;z-index:9999;' +
+                            'cursor:pointer;box-shadow:0 2px 4px rgba(0,0,0,0.3);';
+                        btn.onclick = function(e) {
+                            e.stopPropagation();
+                            e.preventDefault();
+                            PhoenixDownloader.onDownloadClick(fullUrl);
+                        };
+                        
+                        // Position relative to parent
+                        var parent = link;
+                        var style = window.getComputedStyle(parent);
+                        if (style.position === 'static') {
+                            parent.style.position = 'relative';
+                        }
+                        parent.appendChild(btn);
+                    });
+                }
+                
+                // Run now and on DOM changes (for infinite scroll)
+                addButtons();
+                var observer = new MutationObserver(function() { addButtons(); });
+                observer.observe(document.body, { childList: true, subtree: true });
+            })();
+        """.trimIndent()
+        webView.evaluateJavascript(js, null)
     }
 
     override fun onSaveInstanceState(outState: Bundle) {

@@ -20,6 +20,7 @@ import kotlinx.coroutines.withContext
 object YtDlpManager {
 
     private var initialized = false
+    private var updateChecked = false
     private var appContext: Context? = null
 
     /** Must be called once from Application.onCreate(). */
@@ -32,11 +33,16 @@ object YtDlpManager {
     }
 
     fun isInitialized(): Boolean = initialized
+    
+    /** True when init AND update check both completed - safe to use for downloads */
+    fun isReady(): Boolean = initialized && updateChecked
+    
+    fun markUpdateChecked() { updateChecked = true }
 
     /** Step 1: resolve a video URL to its info (thumbnail, title, duration). */
     suspend fun fetchVideoInfo(url: String): Result<VideoInfo> = withContext(Dispatchers.IO) {
         try {
-            if (!initialized) return@withContext Result.failure(Exception("yt-dlp not initialized yet, please wait"))
+            if (!isReady()) return@withContext Result.failure(Exception("yt-dlp updating, please wait..."))
             val request = YoutubeDLRequest(url)
             request.addOption("--dump-json")
             request.addOption("--no-download")
@@ -69,7 +75,7 @@ object YtDlpManager {
      */
     suspend fun fetchFormats(url: String): Result<FormatsResult> = withContext(Dispatchers.IO) {
         try {
-            if (!initialized) return@withContext Result.failure(Exception("yt-dlp not initialized yet, please wait"))
+            if (!isReady()) return@withContext Result.failure(Exception("yt-dlp updating, please wait..."))
             val request = YoutubeDLRequest(url)
             request.addOption("--dump-json")
             request.addOption("--no-download")
@@ -129,7 +135,7 @@ object YtDlpManager {
      */
     suspend fun resolveStreamUrl(url: String): Result<String?> = withContext(Dispatchers.IO) {
         try {
-            if (!initialized) return@withContext Result.failure(Exception("yt-dlp not initialized yet, please wait"))
+            if (!isReady()) return@withContext Result.failure(Exception("yt-dlp updating, please wait..."))
             val request = YoutubeDLRequest(url)
             request.addOption("-g")
             request.addOption("-f")
@@ -154,11 +160,38 @@ object YtDlpManager {
     suspend fun checkForUpdates(): Result<Boolean> = withContext(Dispatchers.IO) {
         try {
             val ctx = appContext ?: return@withContext Result.failure(Exception("Not initialized"))
-            val status = YoutubeDL.getInstance()
-                .updateYoutubeDL(ctx, YoutubeDL.UpdateChannel.STABLE)
-            Result.success(status == YoutubeDL.UpdateStatus.DONE)
+            // Retry up to 3 times - mobile networks are flaky, library has short timeouts
+            var lastError: Exception? = null
+            for (attempt in 1..3) {
+                try {
+                    val status = YoutubeDL.getInstance()
+                        .updateYoutubeDL(ctx, YoutubeDL.UpdateChannel.STABLE)
+                    if (status == YoutubeDL.UpdateStatus.DONE || 
+                        status == YoutubeDL.UpdateStatus.ALREADY_UP_TO_DATE) {
+                        return@withContext Result.success(status == YoutubeDL.UpdateStatus.DONE)
+                    }
+                    // If update failed but not exception, retry
+                    lastError = Exception("Update status: $status, attempt $attempt")
+                } catch (e: Exception) {
+                    lastError = e
+                    if (attempt < 3) {
+                        kotlinx.coroutines.delay(2000) // Wait 2s before retry
+                    }
+                }
+            }
+            Result.failure(lastError ?: Exception("Update failed after 3 attempts"))
         } catch (e: Exception) {
             Result.failure(e)
+        }
+    }
+
+    /** Get current yt-dlp version string for Settings -> About */
+    fun getYtDlpVersion(): String {
+        return try {
+            val ctx = appContext ?: return "unknown"
+            YoutubeDL.getInstance().version(ctx) ?: "unknown"
+        } catch (e: Exception) {
+            "unknown"
         }
     }
 

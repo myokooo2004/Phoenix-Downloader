@@ -56,8 +56,11 @@ class MainActivity : AppCompatActivity() {
                 kotlinx.coroutines.runBlocking {
                     com.phoenix.downloader.core.YtDlpManager.checkForUpdates()
                 }
+                com.phoenix.downloader.core.YtDlpManager.markUpdateChecked()
             } catch (e: Exception) {
                 e.printStackTrace()
+                // Mark checked even on failure so app doesn't block forever
+                com.phoenix.downloader.core.YtDlpManager.markUpdateChecked()
             }
         }.start()
 
