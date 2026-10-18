@@ -1,96 +1,56 @@
 plugins {
-    id("com.android.application")
-    id("org.jetbrains.kotlin.android")
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+    id 'com.chaquo.python'
 }
 
 android {
-    namespace = "com.phoenix.downloader"
-    compileSdk = 34
+    namespace 'com.phoenix.downloader'
+    compileSdk 34
 
     defaultConfig {
-        applicationId = "com.phoenix.downloader"
-        minSdk = 24
-        targetSdk = 34
-        // Auto-version: BUILD_NUMBER from CI (github.run_number), defaults to 1 locally
-        def buildNum = System.getenv("BUILD_NUMBER")?.toInteger() ?: 1
-        versionCode = buildNum
-        versionName = "1.0.${buildNum}"
-        // Keep resource names stable for the bilingual (en + my) builds
-        resourceConfigurations += ["en", "my"]
-    }
+        applicationId "com.phoenix.downloader"
+        minSdk 24
+        targetSdk 34
+        versionCode 1
+        versionName "1.0"
 
-    // Split APKs by ABI: arm64-v8a and armeabi-v7a (two files)
-    splits {
-        abi {
-            enable true
-            reset()
-            include "arm64-v8a", "armeabi-v7a"
-            universalApk false
-        }
-    }
-
-    signingConfigs {
-        create("release") {
-            // Use env vars if provided (CI secrets), otherwise unsigned
-            def keystorePath = System.getenv("KEYSTORE_PATH")
-            if (keystorePath != null && file(keystorePath).exists()) {
-                storeFile = file(keystorePath)
-                storePassword = System.getenv("STORE_PASSWORD")
-                keyAlias = System.getenv("KEY_ALIAS") ?: "upload"
-                keyPassword = System.getenv("KEY_PASSWORD")
-            }
+        ndk {
+            abiFilters "armeabi-v7a", "arm64-v8a", "x86", "x86_64"
         }
     }
 
     buildTypes {
         release {
-            minifyEnabled = false
-            proguardFiles(
-                getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro"
-            )
-            // Use release signing if keystore is provided, otherwise unsigned
-            def keystorePath = System.getenv("KEYSTORE_PATH")
-            if (keystorePath != null && file(keystorePath).exists()) {
-                signingConfig = signingConfigs.getByName("release")
-            }
-        }
-        debug {
-            applicationIdSuffix = ".debug"
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }
-
-    buildFeatures {
-        viewBinding = true
-    }
-
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
     }
     kotlinOptions {
-        jvmTarget = "17"
+        jvmTarget = '1.8'
+    }
+    buildFeatures {
+        viewBinding true
     }
 }
 
 dependencies {
-    implementation("androidx.core:core-ktx:1.13.1")
-    implementation("androidx.appcompat:appcompat:1.7.0")
-    implementation("com.google.android.material:material:1.12.0")
-    implementation("androidx.constraintlayout:constraintlayout:2.1.4")
-    implementation("androidx.fragment:fragment-ktx:1.8.2")
-    implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.3")
-    implementation("androidx.lifecycle:lifecycle-livedata-ktx:2.8.3")
-    implementation("androidx.recyclerview:recyclerview:1.3.2")
-    implementation("androidx.swiperefreshlayout:swiperefreshlayout:1.1.0")
-
-    // Media3 ExoPlayer — in-app video playback
-    def media3Version = "1.4.1"
-    implementation("androidx.media3:media3-exoplayer:$media3Version")
-    implementation("androidx.media3:media3-ui:$media3Version")
-    implementation("androidx.media3:media3-common:$media3Version")
-
-    // youtubedl-android — yt-dlp binary for Android (Seal uses this)
-    // Provides YoutubeDL.getInstance() API with built-in updater
-    implementation("com.github.yausername:youtubedl-android:0.15.0")
+    implementation 'androidx.core:core-ktx:1.12.0'
+    implementation 'androidx.appcompat:appcompat:1.6.1'
+    implementation 'com.google.android.material:material:1.11.0'
+    implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
+    
+    // ExoPlayer (Video Player)
+    implementation 'androidx.media3:media3-exoplayer:1.2.1'
+    implementation 'androidx.media3:media3-ui:1.2.1'
+    
+    // Glide (Image Loading)
+    implementation 'com.github.bumptech.glide:glide:4.16.0'
+    
+    // Coroutines
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
 }
