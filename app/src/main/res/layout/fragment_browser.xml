@@ -162,13 +162,15 @@
             android:layout_height="40dp"
             android:layout_weight="1"
             android:padding="10dp"
-            android:src="@drawable/ic_tabs" />
+            android:src="@drawable/ic_tabs"
+            android:visibility="gone" />
         <ImageView
             android:id="@+id/btn_bar_more"
             android:layout_width="0dp"
             android:layout_height="40dp"
             android:layout_weight="1"
             android:padding="10dp"
-            android:src="@drawable/ic_more" />
+            android:src="@drawable/ic_more"
+            android:visibility="gone" />
     </LinearLayout>
 </LinearLayout>
