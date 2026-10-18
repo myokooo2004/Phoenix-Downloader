@@ -35,6 +35,9 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
+        // Initialize yt-dlp (required before any YtDlpManager calls)
+        com.phoenix.downloader.core.YtDlpManager.init(this)
+
         requestAppPermissions()
 
         binding.bottomNav.setOnItemSelectedListener { item ->
@@ -81,12 +84,18 @@ class MainActivity : AppCompatActivity() {
 
     fun showHome() {
         showFragment(HomeFragment(), addToBackStack = false)
-        binding.bottomNav.selectedItemId = R.id.nav_home
+        // Avoid infinite loop: only set if not already selected
+        if (binding.bottomNav.selectedItemId != R.id.nav_home) {
+            binding.bottomNav.selectedItemId = R.id.nav_home
+        }
     }
 
     fun showDownloads() {
         showFragment(DownloadsFragment(), addToBackStack = false)
-        binding.bottomNav.selectedItemId = R.id.nav_downloads
+        // Avoid infinite loop: only set if not already selected
+        if (binding.bottomNav.selectedItemId != R.id.nav_downloads) {
+            binding.bottomNav.selectedItemId = R.id.nav_downloads
+        }
     }
 
     fun openBrowser(url: String) {
