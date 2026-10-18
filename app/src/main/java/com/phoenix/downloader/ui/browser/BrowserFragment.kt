@@ -147,10 +147,6 @@ class BrowserFragment : Fragment() {
     private fun injectDownloadButtons(webView: WebView) {
         val js = """
             (function() {
-                // Avoid duplicate injection
-                if (window._phoenixInjected) return;
-                window._phoenixInjected = true;
-                
                 function addButtons() {
                     // YouTube: video links in lists
                     var links = document.querySelectorAll('a[href*="/watch?v="]:not([data-phoenix-btn])');
@@ -184,9 +180,13 @@ class BrowserFragment : Fragment() {
                 }
                 
                 // Run now and on DOM changes (for infinite scroll)
+                // Use per-call guard via data attribute, not window flag (allows re-injection on nav)
                 addButtons();
-                var observer = new MutationObserver(function() { addButtons(); });
-                observer.observe(document.body, { childList: true, subtree: true });
+                if (!window._phoenixObserver) {
+                    var observer = new MutationObserver(function() { addButtons(); });
+                    observer.observe(document.body, { childList: true, subtree: true });
+                    window._phoenixObserver = observer;
+                }
             })();
         """.trimIndent()
         webView.evaluateJavascript(js, null)
