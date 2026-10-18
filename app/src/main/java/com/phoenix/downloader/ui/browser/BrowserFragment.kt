@@ -18,6 +18,7 @@ import com.phoenix.downloader.R
 import com.phoenix.downloader.core.UrlDetector
 import com.phoenix.downloader.core.YtDlpManager
 import com.phoenix.downloader.databinding.FragmentBrowserBinding
+import com.phoenix.downloader.ui.download.DownloadDialogFragment
 import kotlinx.coroutines.launch
 
 /**
@@ -59,7 +60,7 @@ class BrowserFragment : Fragment() {
                 activity?.runOnUiThread {
                     viewLifecycleOwner.lifecycleScope.launch {
                         YtDlpManager.fetchVideoInfo(videoUrl)
-                            .onSuccess { (activity as? MainActivity)?.openDownloadDialog(it.url, it.title) }
+                            .onSuccess { DownloadDialogFragment.newInstance(it.url, it.title).show(parentFragmentManager, "DownloadDialog") }
                             .onFailure { 
                                 context?.let { ctx ->
                                     android.widget.Toast.makeText(
@@ -124,7 +125,7 @@ class BrowserFragment : Fragment() {
             val url = pendingVideoUrl ?: return@setOnClickListener
             viewLifecycleOwner.lifecycleScope.launch {
                 YtDlpManager.fetchVideoInfo(url)
-                    .onSuccess { (activity as? MainActivity)?.openDownloadDialog(it.url, it.title) }
+                    .onSuccess { DownloadDialogFragment.newInstance(it.url, it.title).show(parentFragmentManager, "DownloadDialog") }
             }
         }
 
