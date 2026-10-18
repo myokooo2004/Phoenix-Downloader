@@ -58,10 +58,14 @@ object CrashLogger {
 
     /** Returns the crash log content, or null if empty/missing. */
     fun getLog(context: Context): String? {
-        val file = File(context.filesDir, CRASH_FILE)
-        if (!file.exists()) return null
-        val content = file.readText()
-        return content.ifBlank { null }
+        return try {
+            val file = File(context.filesDir, CRASH_FILE)
+            if (!file.exists()) return null
+            val content = file.readText()
+            content.ifBlank { null }
+        } catch (_: Exception) {
+            null
+        }
     }
 
     /** Clears the crash log. */
