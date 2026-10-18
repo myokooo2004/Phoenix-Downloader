@@ -31,7 +31,21 @@ jobs:
       - name: Make Gradlew Executable
         run: chmod +x gradlew
 
+      - name: Decode keystore (if provided)
+        run: |
+          if [ -n "${{ secrets.KEYSTORE_BASE64 }}" ]; then
+            echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > downloader-release.jks
+            echo "Keystore decoded"
+          else
+            echo "No keystore secret, building unsigned"
+          fi
+
       - name: Build release APK
+        env:
+          KEYSTORE_PATH: ${{ github.workspace }}/downloader-release.jks
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: ./gradlew assembleRelease --no-daemon --stacktrace 2>&1 | tee build.log; test ${PIPESTATUS[0]} -eq 0
 
       - name: Upload build log
