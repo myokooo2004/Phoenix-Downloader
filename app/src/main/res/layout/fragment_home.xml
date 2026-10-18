@@ -49,7 +49,7 @@
                     android:hint="@string/search_hint"
                     android:textColor="@color/text_primary"
                     android:textColorHint="@color/text_hint"
-                    android:textSize="15sp"
+                    android:textSize="14sp"
                     android:singleLine="true"
                     android:imeOptions="actionSearch"
                     android:inputType="textUri" />
