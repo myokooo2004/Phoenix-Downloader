@@ -1,249 +1,258 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
+    android:orientation="vertical"
     android:background="@color/card">
 
-    <LinearLayout
+    <ScrollView
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:padding="16dp">
+        android:layout_height="0dp"
+        android:layout_weight="1">
 
-        <!-- Top card: thumbnail + title + rename -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical"
-            android:background="@color/card"
-            android:padding="12dp">
+            android:orientation="vertical"
+            android:padding="16dp">
 
-            <FrameLayout
-                android:layout_width="110dp"
-                android:layout_height="70dp"
-                android:background="#E0E0E0">
-
-                <ImageView
-                    android:id="@+id/iv_dlg_thumb"
-                    android:layout_width="match_parent"
-                    android:layout_height="match_parent"
-                    android:scaleType="centerCrop" />
-
-                <ImageView
-                    android:layout_width="24dp"
-                    android:layout_height="24dp"
-                    android:layout_gravity="center"
-                    android:src="@android:drawable/ic_media_play"
-                    android:alpha="0.9" />
-
-                <TextView
-                    android:id="@+id/tv_dlg_duration"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_gravity="bottom|end"
-                    android:layout_margin="4dp"
-                    android:background="#99000000"
-                    android:padding="3dp"
-                    android:textColor="@color/white"
-                    android:textSize="10sp" />
-            </FrameLayout>
-
+            <!-- Top card: thumbnail + title + rename -->
             <LinearLayout
-                android:layout_width="0dp"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:layout_marginStart="12dp"
-                android:orientation="vertical">
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:padding="12dp">
 
-                <TextView
-                    android:id="@+id/tv_dlg_title"
-                    android:layout_width="match_parent"
+                <FrameLayout
+                    android:layout_width="110dp"
+                    android:layout_height="70dp"
+                    android:background="#E0E0E0">
+
+                    <ImageView
+                        android:id="@+id/iv_dlg_thumb"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:scaleType="centerCrop" />
+
+                    <ImageView
+                        android:layout_width="24dp"
+                        android:layout_height="24dp"
+                        android:layout_gravity="center"
+                        android:src="@android:drawable/ic_media_play"
+                        android:alpha="0.9" />
+
+                    <TextView
+                        android:id="@+id/tv_dlg_duration"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_gravity="bottom|end"
+                        android:layout_margin="4dp"
+                        android:background="#99000000"
+                        android:padding="3dp"
+                        android:textColor="@color/white"
+                        android:textSize="10sp" />
+                </FrameLayout>
+
+                <LinearLayout
+                    android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:textColor="@color/text_primary"
-                    android:textSize="14sp"
-                    android:textStyle="bold"
-                    android:maxLines="2"
-                    android:ellipsize="end" />
+                    android:layout_weight="1"
+                    android:layout_marginStart="12dp"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:id="@+id/tv_dlg_title"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:textColor="@color/text_primary"
+                        android:textSize="14sp"
+                        android:textStyle="bold"
+                        android:maxLines="2"
+                        android:ellipsize="end" />
+
+                    <TextView
+                        android:id="@+id/tv_dlg_rename"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:text="Rename"
+                        android:textColor="#2196F3"
+                        android:textSize="13sp"
+                        android:clickable="true"
+                        android:focusable="true" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <!-- Path row -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginTop="8dp"
+                android:padding="12dp">
 
                 <TextView
-                    android:id="@+id/tv_dlg_rename"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="4dp"
-                    android:text="Rename"
+                    android:text="⬇"
+                    android:textSize="20sp"
+                    android:textColor="@color/text_primary" />
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginStart="10dp"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:id="@+id/tv_dlg_path"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Path:/storage/em...dMate/download/"
+                        android:textColor="@color/text_primary"
+                        android:textSize="13sp"
+                        android:singleLine="true"
+                        android:ellipsize="middle" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:layout_marginTop="4dp">
+
+                        <TextView
+                            android:id="@+id/tv_dlg_storage"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="129.2GB FREE/224.5GB"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="11sp" />
+
+                        <ProgressBar
+                            android:id="@+id/pb_dlg_storage"
+                            style="?android:attr/progressBarStyleHorizontal"
+                            android:layout_width="0dp"
+                            android:layout_height="4dp"
+                            android:layout_weight="1"
+                            android:layout_marginStart="8dp"
+                            android:progress="40" />
+                    </LinearLayout>
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/tv_dlg_change"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:text="Change"
                     android:textColor="#2196F3"
                     android:textSize="13sp"
                     android:clickable="true"
                     android:focusable="true" />
             </LinearLayout>
-        </LinearLayout>
-
-        <!-- Path row -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical"
-            android:layout_marginTop="8dp"
-            android:padding="12dp">
 
             <TextView
-                android:layout_width="wrap_content"
+                android:id="@+id/tv_fetching"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="⬇"
-                android:textSize="20sp"
-                android:textColor="@color/text_primary" />
+                android:layout_marginTop="16dp"
+                android:gravity="center"
+                android:text="@string/fetching_formats"
+                android:visibility="gone" />
 
+            <!-- Music section -->
             <LinearLayout
-                android:layout_width="0dp"
+                android:id="@+id/layout_music_section"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:layout_marginStart="10dp"
-                android:orientation="vertical">
-
-                <TextView
-                    android:id="@+id/tv_dlg_path"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="Path:/storage/em...dMate/download/"
-                    android:textColor="@color/text_primary"
-                    android:textSize="13sp"
-                    android:singleLine="true"
-                    android:ellipsize="middle" />
+                android:orientation="vertical"
+                android:layout_marginTop="16dp"
+                android:visibility="gone">
 
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="horizontal"
-                    android:gravity="center_vertical"
-                    android:layout_marginTop="4dp">
+                    android:gravity="center_vertical">
 
                     <TextView
-                        android:id="@+id/tv_dlg_storage"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="129.2GB FREE/224.5GB"
-                        android:textColor="@color/text_secondary"
-                        android:textSize="11sp" />
+                        android:text="🎵"
+                        android:textSize="18sp" />
 
-                    <ProgressBar
-                        android:id="@+id/pb_dlg_storage"
-                        style="?android:attr/progressBarStyleHorizontal"
-                        android:layout_width="0dp"
-                        android:layout_height="4dp"
-                        android:layout_weight="1"
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
                         android:layout_marginStart="8dp"
-                        android:progress="40" />
+                        android:text="@string/section_music"
+                        android:textSize="15sp"
+                        android:textStyle="bold"
+                        android:textColor="@color/text_primary" />
                 </LinearLayout>
+
+                <androidx.recyclerview.widget.RecyclerView
+                    android:id="@+id/rv_audio_formats"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:nestedScrollingEnabled="false" />
             </LinearLayout>
 
-            <TextView
-                android:id="@+id/tv_dlg_change"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="8dp"
-                android:text="Change"
-                android:textColor="#2196F3"
-                android:textSize="13sp"
-                android:clickable="true"
-                android:focusable="true" />
-        </LinearLayout>
-
-        <TextView
-            android:id="@+id/tv_fetching"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:gravity="center"
-            android:text="@string/fetching_formats"
-            android:visibility="gone" />
-
-        <!-- Music section -->
-        <LinearLayout
-            android:id="@+id/layout_music_section"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:layout_marginTop="16dp"
-            android:visibility="gone">
-
+            <!-- Video section -->
             <LinearLayout
+                android:id="@+id/layout_video_section"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center_vertical">
+                android:orientation="vertical"
+                android:layout_marginTop="16dp"
+                android:visibility="gone">
 
-                <TextView
-                    android:layout_width="wrap_content"
+                <LinearLayout
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="🎵"
-                    android:textSize="18sp" />
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
 
-                <TextView
-                    android:layout_width="wrap_content"
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="🎬"
+                        android:textSize="18sp" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="8dp"
+                        android:text="@string/section_video"
+                        android:textSize="15sp"
+                        android:textStyle="bold"
+                        android:textColor="@color/text_primary" />
+                </LinearLayout>
+
+                <androidx.recyclerview.widget.RecyclerView
+                    android:id="@+id/rv_video_formats"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginStart="8dp"
-                    android:text="@string/section_music"
-                    android:textSize="15sp"
-                    android:textStyle="bold"
-                    android:textColor="@color/text_primary" />
+                    android:layout_marginTop="8dp"
+                    android:nestedScrollingEnabled="false" />
             </LinearLayout>
-
-            <androidx.recyclerview.widget.RecyclerView
-                android:id="@+id/rv_audio_formats"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp" />
         </LinearLayout>
+    </ScrollView>
 
-        <!-- Video section -->
-        <LinearLayout
-            android:id="@+id/layout_video_section"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:layout_marginTop="16dp"
-            android:visibility="gone">
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center_vertical">
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="🎬"
-                    android:textSize="18sp" />
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="8dp"
-                    android:text="@string/section_video"
-                    android:textSize="15sp"
-                    android:textStyle="bold"
-                    android:textColor="@color/text_primary" />
-            </LinearLayout>
-
-            <androidx.recyclerview.widget.RecyclerView
-                android:id="@+id/rv_video_formats"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp" />
-        </LinearLayout>
-
-        <Button
-            android:id="@+id/btn_download"
-            android:layout_width="match_parent"
-            android:layout_height="50dp"
-            android:layout_marginTop="20dp"
-            android:background="@drawable/bg_btn_download"
-            android:text="@string/download"
-            android:textColor="@color/white"
-            android:textSize="16sp"
-            android:textStyle="bold" />
-    </LinearLayout>
-</ScrollView>
+    <!-- Fixed DOWNLOAD button at bottom -->
+    <Button
+        android:id="@+id/btn_download"
+        android:layout_width="match_parent"
+        android:layout_height="50dp"
+        android:layout_margin="16dp"
+        android:background="@drawable/bg_btn_download"
+        android:text="@string/download"
+        android:textColor="@color/white"
+        android:textSize="16sp"
+        android:textStyle="bold" />
+</LinearLayout>
