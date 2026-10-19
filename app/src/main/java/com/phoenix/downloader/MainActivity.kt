@@ -67,6 +67,13 @@ class MainActivity : AppCompatActivity() {
             .commit()
     }
 
+    fun openVideoDetail(url: String, title: String, thumbnail: String = "", duration: Int = 0) {
+        supportFragmentManager.beginTransaction()
+            .replace(R.id.nav_host, com.phoenix.downloader.ui.detail.VideoDetailFragment.newInstance(url, title, thumbnail, duration))
+            .addToBackStack(null)
+            .commit()
+    }
+
     fun openBrowser(url: String) {
         supportFragmentManager.beginTransaction()
             .replace(R.id.nav_host, com.phoenix.downloader.ui.browser.BrowserFragment.newInstance(url))

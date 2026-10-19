@@ -122,7 +122,7 @@ class HomeFragment : Fragment() {
                 return@launch
             }
             binding.rvVideos.adapter = VideoAdapter(videoList,
-                onWatchClick = { video -> (activity as MainActivity).openPlayer(video.url, video.title) },
+                onWatchClick = { video -> (activity as MainActivity).openVideoDetail(video.url, video.title, video.thumbnail, video.duration) },
                 onDownloadClick = { video -> DownloadDialogFragment.newInstance(video.url, video.title).show(childFragmentManager, "DownloadDialog") }
             )
         }
