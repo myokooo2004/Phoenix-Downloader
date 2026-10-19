@@ -17,6 +17,9 @@ import kotlinx.coroutines.withContext
  */
 object YtDlpManager {
 
+    /** Set to false to test with the library's bundled yt-dlp only. */
+    private const val AUTO_UPDATE = true
+
     private var initialized = false
     private var updateChecked = false
     private var appContext: Context? = null
@@ -32,15 +35,20 @@ object YtDlpManager {
             initialized = true
             updateChecked = true
             initError = null
-            // Keep yt-dlp fresh: update in the background, never block the UI.
-            CoroutineScope(Dispatchers.IO).launch { checkForUpdates() }
+            logNote("YtDlpManager.version", "yt-dlp version after init: ${getYtDlpVersion()}")
+            if (AUTO_UPDATE) {
+                CoroutineScope(Dispatchers.IO).launch {
+                    val r = checkForUpdates()
+                    logNote(
+                        "YtDlpManager.update",
+                        "update installed=${r.getOrNull()} error=${r.exceptionOrNull()?.message} " +
+                            "version now: ${getYtDlpVersion()}"
+                    )
+                }
+            }
         } catch (e: Exception) {
             initError = e
-            appContext?.let { ctx ->
-                try {
-                    CrashLogger.logNonFatal(ctx, "YtDlpManager.init", e)
-                } catch (_: Exception) { }
-            }
+            logFailure("YtDlpManager.init", e)
         }
     }
 
@@ -66,10 +74,20 @@ object YtDlpManager {
 
     fun markUpdateChecked() { updateChecked = true }
 
-    /**
-     * Common options. No forced player_client, no custom user-agent and no
-     * --no-check-certificate: yt-dlp's own defaults work best against YouTube.
-     */
+    /** Full error goes to crash.log (long-press the language button to copy it). */
+    private fun logFailure(tag: String, e: Throwable) {
+        appContext?.let { ctx ->
+            try {
+                CrashLogger.logNonFatal(ctx, tag, e)
+            } catch (_: Exception) { }
+        }
+    }
+
+    private fun logNote(tag: String, message: String) {
+        logFailure(tag, Exception(message))
+    }
+
+    /** Common options. No forced player_client, no custom user-agent, TLS checks on. */
     private fun baseRequest(url: String): YoutubeDLRequest {
         val request = YoutubeDLRequest(url)
         request.addOption("--socket-timeout", "30")
@@ -103,9 +121,7 @@ object YtDlpManager {
                 )
             )
         } catch (e: Exception) {
-            appContext?.let { ctx ->
-                try { CrashLogger.logNonFatal(ctx, "YtDlpManager.fetchVideoInfo", e) } catch (_: Exception) { }
-            }
+            logFailure("fetchVideoInfo", e)
             Result.failure(e)
         }
     }
@@ -162,9 +178,7 @@ object YtDlpManager {
             }
             Result.success(FormatsResult(music = music, video = sortedVideo))
         } catch (e: Exception) {
-            appContext?.let { ctx ->
-                try { CrashLogger.logNonFatal(ctx, "YtDlpManager.fetchFormats", e) } catch (_: Exception) { }
-            }
+            logFailure("fetchFormats", e)
             Result.failure(e)
         }
     }
@@ -183,9 +197,7 @@ object YtDlpManager {
             val streamUrl = response.out.lineSequence().firstOrNull()?.trim()
             Result.success(streamUrl?.ifEmpty { null })
         } catch (e: Exception) {
-            appContext?.let { ctx ->
-                try { CrashLogger.logNonFatal(ctx, "YtDlpManager.resolveStreamUrl", e) } catch (_: Exception) { }
-            }
+            logFailure("resolveStreamUrl", e)
             Result.failure(e)
         }
     }
