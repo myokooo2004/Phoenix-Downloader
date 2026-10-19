@@ -24,9 +24,6 @@ object YtDlpManager {
     private var appContext: Context? = null
     /** Set when init() throws — the real reason fetches fail (never silent). */
     private var initError: Throwable? = null
-    /** GitHub Gist URL where the init error log was auto-uploaded (if successful). */
-    var initErrorGistUrl: String? = null
-        private set
 
     /** Must be called once from Application.onCreate(). */
     fun init(context: Context) {
@@ -45,10 +42,6 @@ object YtDlpManager {
                 appContext?.let { ctx ->
                     try {
                         CrashLogger.logNonFatal(ctx, "YtDlpManager.init", e)
-                        // Auto-upload to GitHub Gist in background
-                        kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                            initErrorGistUrl = CrashLogger.uploadToGist(ctx)
-                        }
                     } catch (_: Exception) { }
                 }
             }

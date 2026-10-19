@@ -73,30 +73,6 @@ object CrashLogger {
         file.appendText(entry)
     }
 
-    /** Upload log to anonymous GitHub Gist, returns URL or null. */
-    fun uploadToGist(context: Context): String? {
-        val log = getLog(context) ?: return null
-        return try {
-            val url = java.net.URL("https://api.github.com/gists")
-            val conn = url.openConnection() as javax.net.ssl.HttpsURLConnection
-            conn.requestMethod = "POST"
-            conn.setRequestProperty("Content-Type", "application/json")
-            conn.setRequestProperty("User-Agent", "Phoenix-Downloader")
-            conn.doOutput = true
-            conn.connectTimeout = 15000
-            conn.readTimeout = 15000
-            val escaped = log.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r").take(90000)
-            val body = "{\"public\":false,\"files\":{\"phoenix-downloader-log.txt\":{\"content\":\"$escaped\"}}}"
-            conn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
-            val response = conn.inputStream.bufferedReader().readText()
-            // Extract html_url from response
-            val match = Regex("\"html_url\"\\s*:\\s*\"([^\"]+)\"").find(response)
-            match?.groupValues?.get(1)
-        } catch (_: Exception) {
-            null
-        }
-    }
-
     /** Returns the crash log content, or null if empty/missing. */
     fun getLog(context: Context): String? {
         return try {
