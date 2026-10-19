@@ -5,13 +5,12 @@ import android.content.Intent
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
-import com.chaquo.python.Python
-import com.chaquo.python.android.AndroidPlatform
+import com.yausername.youtubedl_android.YoutubeDL
+import com.yausername.youtubedl_android.YoutubeDLRequest
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import java.io.File
-import java.io.FileOutputStream
 
 class DownloadService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
@@ -24,37 +23,35 @@ class DownloadService : Service() {
         startForeground(1, buildNotification("Preparing...", 0))
 
         CoroutineScope(Dispatchers.IO).launch {
-            if (!Python.isStarted()) Python.start(AndroidPlatform(applicationContext))
-            val py = Python.getInstance()
-            val outputDir = getExternalFilesDir(null)?.absolutePath ?: filesDir.absolutePath
-            val ffmpegPath = extractFFmpeg() 
+            try {
+                val outputDir = getExternalFilesDir(null)?.absolutePath ?: filesDir.absolutePath
+                val safeTitle = title.replace(Regex("[\\\\/:*?\"<>|]"), "_").take(100)
+                val outputTemplate = "$outputDir/$safeTitle.%(ext)s"
 
-            val callback = object : java.lang.Object() {
-                fun onProgress(percent: Float) {
-                    updateNotification("$title: ${percent.toInt()}%", percent.toInt())
+                val request = YoutubeDLRequest(url)
+                request.addOption("-f", formatId)
+                request.addOption("-o", outputTemplate)
+                request.addOption("--no-check-certificate")
+                request.addOption("--socket-timeout", "30")
+
+                updateNotification("$title: 0%", 0)
+
+                YoutubeDL.getInstance().execute(request) { progress, _, _ ->
+                    val pct = progress.toInt().coerceIn(0, 100)
+                    updateNotification("$title: $pct%", pct)
                 }
+
+                updateNotification("$title: Complete", 100)
+            } catch (e: Exception) {
+                e.printStackTrace()
+                updateNotification("$title: Failed", 0)
+            } finally {
+                stopForeground(true)
+                stopSelf()
             }
-            
-            py.getModule("ytdlp_bridge").callAttr("download_video", url, formatId, outputDir, ffmpegPath, callback)
-            
-            stopForeground(true)
-            stopSelf()
         }
 
         return START_NOT_STICKY
-    }
-
-    private fun extractFFmpeg(): String {
-        val ffmpegFile = File(filesDir, "ffmpeg")
-        if (!ffmpegFile.exists()) {
-            try {
-                assets.open("ffmpeg").use { input ->
-                    FileOutputStream(ffmpegFile).use { output -> input.copyTo(output) }
-                }
-                ffmpegFile.setExecutable(true)
-            } catch (e: Exception) { e.printStackTrace() }
-        }
-        return ffmpegFile.absolutePath
     }
 
     private fun buildNotification(text: String, progress: Int): Notification {

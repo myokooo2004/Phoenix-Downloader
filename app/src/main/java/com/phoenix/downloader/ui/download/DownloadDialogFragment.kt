@@ -7,13 +7,13 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
-import com.chaquo.python.Python
-import com.chaquo.python.android.AndroidPlatform
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
 import com.phoenix.downloader.core.DownloadService
+import com.phoenix.downloader.core.YtDlpManager
 import com.phoenix.downloader.databinding.DialogDownloadBinding
-import org.json.JSONObject
+import kotlinx.coroutines.launch
 
 class DownloadDialogFragment : BottomSheetDialogFragment() {
     private var _binding: DialogDownloadBinding? = null
@@ -36,56 +36,39 @@ class DownloadDialogFragment : BottomSheetDialogFragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         binding.tvDlgTitle.text = videoTitle
-        if (!Python.isStarted()) Python.start(AndroidPlatform(requireContext()))
         fetchFormats()
         binding.btnDownload.setOnClickListener { startDownload() }
     }
 
     private fun fetchFormats() {
         binding.tvFetching.visibility = View.VISIBLE
-        Thread {
-            val py = Python.getInstance()
-            val result = py.getModule("ytdlp_bridge").callAttr("get_formats", videoUrl).toString()
-            requireActivity().runOnUiThread {
-                binding.tvFetching.visibility = View.GONE
-                val json = JSONObject(result)
-                if (json.optBoolean("ok")) parseFormats(json) else Toast.makeText(requireContext(), "Error", Toast.LENGTH_SHORT).show()
+        lifecycleScope.launch {
+            val result = YtDlpManager.fetchFormats(videoUrl)
+            binding.tvFetching.visibility = View.GONE
+            result.onSuccess { formatsResult ->
+                val videoList = formatsResult.video.map {
+                    FormatInfo(it.id, "${it.label} (${it.format})", it.sizeLabel, false)
+                }
+                val audioList = formatsResult.music.map {
+                    FormatInfo(it.id, "${it.label} (${it.format})", it.sizeLabel, true)
+                }
+
+                if (videoList.isNotEmpty()) {
+                    binding.tvVideoHeader.visibility = View.VISIBLE
+                    binding.rvVideoFormats.layoutManager = LinearLayoutManager(requireContext())
+                    binding.rvVideoFormats.adapter = FormatAdapter(videoList) { selectedFormatId = it.id }
+                }
+                if (audioList.isNotEmpty()) {
+                    binding.tvAudioHeader.visibility = View.VISIBLE
+                    binding.rvAudioFormats.layoutManager = LinearLayoutManager(requireContext())
+                    binding.rvAudioFormats.adapter = FormatAdapter(audioList) { selectedFormatId = it.id }
+                }
+                if (videoList.isEmpty() && audioList.isEmpty()) {
+                    Toast.makeText(requireContext(), "No formats found", Toast.LENGTH_SHORT).show()
+                }
+            }.onFailure {
+                Toast.makeText(requireContext(), "Failed: ${it.message}", Toast.LENGTH_SHORT).show()
             }
-        }.start()
-    }
-
-    private fun parseFormats(json: JSONObject) {
-        val formatsArray = json.getJSONArray("formats")
-        val videoList = mutableListOf<FormatInfo>()
-        val audioList = mutableListOf<FormatInfo>()
-
-        for (i in 0 until formatsArray.length()) {
-            val obj = formatsArray.getJSONObject(i)
-            val formatId = obj.optString("format_id")
-            val ext = obj.optString("ext")
-            val height = obj.optInt("height", 0)
-            val vcodec = obj.optString("vcodec")
-            val acodec = obj.optString("acodec")
-            val filesize = obj.optLong("filesize", 0)
-            val sizeMb = if (filesize > 0) String.format("%.1f MB", filesize / (1024f * 1024f)) else "Unknown"
-
-            if (vcodec != "none") {
-                val label = if (height >= 2160) "4K (${ext})" else if (height > 0) "${height}p (${ext})" else "Video ($ext)"
-                videoList.add(FormatInfo(formatId, label, sizeMb, false))
-            } else if (vcodec == "none" && acodec != "none") {
-                audioList.add(FormatInfo(formatId, "Audio ($ext)", sizeMb, true))
-            }
-        }
-
-        if (videoList.isNotEmpty()) {
-            binding.tvVideoHeader.visibility = View.VISIBLE
-            binding.rvVideoFormats.layoutManager = LinearLayoutManager(requireContext())
-            binding.rvVideoFormats.adapter = FormatAdapter(videoList) { selectedFormatId = it.id }
-        }
-        if (audioList.isNotEmpty()) {
-            binding.tvAudioHeader.visibility = View.VISIBLE
-            binding.rvAudioFormats.layoutManager = LinearLayoutManager(requireContext())
-            binding.rvAudioFormats.adapter = FormatAdapter(audioList) { selectedFormatId = it.id }
         }
     }
 
@@ -98,6 +81,11 @@ class DownloadDialogFragment : BottomSheetDialogFragment() {
         ContextCompat.startForegroundService(requireContext(), intent)
         dismiss()
         Toast.makeText(requireContext(), "Download စတင်ပါပြီ", Toast.LENGTH_SHORT).show()
+    }
+
+    override fun onDestroyView() {
+        super.onDestroyView()
+        _binding = null
     }
 
     companion object {
