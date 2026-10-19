@@ -75,9 +75,12 @@ async function handleRequest(request) {
 
   if (path === "/related") {
     const videoId = url.searchParams.get("videoId");
-    if (!videoId) return jsonError(400, "videoId required");
+    const q = url.searchParams.get("q");
+    if (!videoId && !q) return jsonError(400, "videoId or q required");
     const maxResults = Math.min(parseInt(url.searchParams.get("maxResults") || "20", 10), 50);
-    const api = `${YT_BASE}/search?part=snippet&relatedToVideoId=${encodeURIComponent(videoId)}&type=video&maxResults=${maxResults}&key=${key}`;
+    // Note: YouTube deprecated relatedToVideoId; use text search on title instead
+    const query = q || videoId;
+    const api = `${YT_BASE}/search?part=snippet&q=${encodeURIComponent(query)}&type=video&maxResults=${maxResults}&key=${key}`;
     // Related is per-video; cache 1 hour
     return ytFetch(api, 3600);
   }

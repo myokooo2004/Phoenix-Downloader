@@ -126,7 +126,7 @@ class VideoDetailFragment : Fragment() {
     private fun loadRelated() {
         val videoId = YouTubeApiClient.extractVideoId(videoUrl) ?: return
         viewLifecycleOwner.lifecycleScope.launch {
-            val result = YouTubeApiClient.getRelatedVideos(videoId, 20)
+            val result = YouTubeApiClient.getRelatedVideos(videoId, 20, videoTitle)
             val list = if (result.isSuccess) {
                 result.getOrNull() ?: emptyList()
             } else emptyList()

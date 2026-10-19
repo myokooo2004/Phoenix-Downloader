@@ -110,11 +110,14 @@ object YouTubeApiClient {
      * Fetch related videos for a video ID.
      * Uses search.list with relatedToVideoId (100 quota units per call).
      */
-    suspend fun getRelatedVideos(videoId: String, maxResults: Int = 20): Result<List<VideoItem>> = withContext(Dispatchers.IO) {
+    suspend fun getRelatedVideos(videoId: String, maxResults: Int = 20, query: String? = null): Result<List<VideoItem>> = withContext(Dispatchers.IO) {
         try {
-            val urlStr = "$WORKER_BASE/related" +
+            var urlStr = "$WORKER_BASE/related" +
                     "?videoId=$videoId" +
                     "&maxResults=${maxResults.coerceIn(1, 50)}"
+            if (query != null) {
+                urlStr += "&q=${java.net.URLEncoder.encode(query, "UTF-8")}"
+            }
             val url = URL(urlStr)
             val conn = url.openConnection() as HttpURLConnection
             conn.requestMethod = "GET"
