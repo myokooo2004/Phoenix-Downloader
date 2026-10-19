@@ -31,39 +31,20 @@ jobs:
       - name: Make Gradlew Executable
         run: chmod +x gradlew
 
-      - name: Bundle latest yt-dlp (override library's old version)
-        if: false  # DISABLED 2026-10-19: custom bundling breaks YoutubeDL.init() on device; use library's bundled yt-dlp instead
+      - name: Bundle latest yt-dlp (official zipapp)
         run: |
-          # Try to download latest yt-dlp release; on ANY failure keep the
-          # already-bundled app/src/main/res/raw/ytdlp (never fail the build here).
           set +e
-          YTDLP_VER=$(curl -fsS -m 60 https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest 2>/dev/null | grep '"tag_name"' | cut -d'"' -f4)
-          if [ -z "$YTDLP_VER" ]; then
-            echo "GitHub API failed, using fallback version"
-            YTDLP_VER="2026.08.19"
-          fi
-          echo "Latest yt-dlp: $YTDLP_VER"
-          OK=0
-          if curl -fsSL -m 120 "https://github.com/yt-dlp/yt-dlp/archive/refs/tags/${YTDLP_VER}.zip" -o /tmp/ytdlp.zip; then
-            rm -rf /tmp/ytdlp_src && mkdir -p /tmp/ytdlp_src
-            if unzip -q /tmp/ytdlp.zip -d /tmp/ytdlp_src; then
-              D=$(echo /tmp/ytdlp_src/yt-dlp-*)
-              if [ -d "$D/yt_dlp" ]; then
-                cd "$D"
-                if zip -qr /tmp/ytdlp_new.zip yt_dlp; then
-                  printf '#!/usr/bin/env python3\n' | cat - /tmp/ytdlp_new.zip > "${{ github.workspace }}/app/src/main/res/raw/ytdlp"
-                  OK=1
-                fi
-              fi
-            fi
-          fi
-          if [ "$OK" = "1" ]; then
-            ls -lh "${{ github.workspace }}/app/src/main/res/raw/ytdlp"
-            echo "Bundled yt-dlp $YTDLP_VER"
+          VER=$(curl -fsS -m 60 https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest | grep '"tag_name"' | cut -d'"' -f4)
+          [ -z "$VER" ] && VER="2026.08.19"
+          echo "yt-dlp version: $VER"
+          if curl -fsSL -m 180 "https://github.com/yt-dlp/yt-dlp/releases/download/${VER}/yt-dlp" -o /tmp/ytdlp \
+             && python3 -c "import zipfile; z=zipfile.ZipFile('/tmp/ytdlp'); assert '__main__.py' in z.namelist()"; then
+            cp /tmp/ytdlp app/src/main/res/raw/ytdlp
+            echo "Bundled official yt-dlp $VER"
           else
-            echo "Download/bundle failed - keeping existing bundled yt-dlp"
-            ls -lh "${{ github.workspace }}/app/src/main/res/raw/ytdlp"
+            echo "Download or validation failed - keeping existing bundled yt-dlp"
           fi
+          ls -lh app/src/main/res/raw/ytdlp
           exit 0
 
       - name: Decode or generate keystore
