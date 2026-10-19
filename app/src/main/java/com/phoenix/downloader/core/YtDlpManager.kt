@@ -69,9 +69,12 @@ object YtDlpManager {
     }
 
     /** Human-readable reason fetches are failing — for error UI, not logcat-only. */
-    fun notReadyReason(): String =
-        initError?.let { "yt-dlp init failed: ${it.message}" }
-            ?: "yt-dlp not initialized yet, please wait..."
+    fun notReadyReason(): String {
+        val err = initError ?: return "yt-dlp not initialized yet, please wait..."
+        val chain = generateSequence<Throwable>(err) { it.cause }
+            .joinToString(" <- ") { "${it.javaClass.simpleName}: ${it.message}" }
+        return "yt-dlp init failed: $chain"
+    }
     
     /** True when init AND update check both completed - safe to use for downloads */
     fun isReady(): Boolean = initialized && updateChecked

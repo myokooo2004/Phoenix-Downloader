@@ -32,6 +32,7 @@ jobs:
         run: chmod +x gradlew
 
       - name: Bundle latest yt-dlp (official zipapp)
+        if: false  # DISABLED 2026-10-19: use library's bundled yt-dlp; custom bundling may break init
         run: |
           set +e
           VER=$(curl -fsS -m 60 https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest | grep '"tag_name"' | cut -d'"' -f4)
