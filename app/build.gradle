@@ -69,5 +69,5 @@ dependencies {
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
 
     // yt-dlp via youtubedl-android (JitPack)
-    implementation 'com.github.yausername:youtubedl-android:0.15.0'
+    implementation 'com.github.yausername:youtubedl-android:0.16.0'
 }
