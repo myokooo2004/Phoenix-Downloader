@@ -32,6 +32,7 @@ jobs:
         run: chmod +x gradlew
 
       - name: Bundle latest yt-dlp (override library's old version)
+        if: false  # DISABLED 2026-10-19: custom bundling breaks YoutubeDL.init() on device; use library's bundled yt-dlp instead
         run: |
           # Try to download latest yt-dlp release; on ANY failure keep the
           # already-bundled app/src/main/res/raw/ytdlp (never fail the build here).
