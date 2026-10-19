@@ -19,6 +19,10 @@ import org.json.JSONObject
 class HomeFragment : Fragment() {
     private var _binding: FragmentHomeBinding? = null
     private val binding get() = _binding!!
+    private val videoList = mutableListOf<VideoItem>()
+    private var nextPageToken: String? = null
+    private var isLoading = false
+    private var videoAdapter: VideoAdapter? = null
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
         _binding = FragmentHomeBinding.inflate(inflater, container, false)
@@ -30,6 +34,7 @@ class HomeFragment : Fragment() {
         binding.rvVideos.layoutManager = LinearLayoutManager(requireContext())
 
         // Hide search bar on scroll down, show on scroll up (Vidmate-style)
+        // + Infinite scroll: load more when reaching bottom
         binding.rvVideos.addOnScrollListener(object : androidx.recyclerview.widget.RecyclerView.OnScrollListener() {
             override fun onScrolled(recyclerView: androidx.recyclerview.widget.RecyclerView, dx: Int, dy: Int) {
                 super.onScrolled(recyclerView, dx, dy)
@@ -37,6 +42,14 @@ class HomeFragment : Fragment() {
                     binding.searchBarContainer.visibility = View.GONE
                 } else if (dy < -10) {
                     binding.searchBarContainer.visibility = View.VISIBLE
+                }
+
+                // Infinite scroll
+                val layoutManager = recyclerView.layoutManager as? LinearLayoutManager ?: return
+                val totalItemCount = layoutManager.itemCount
+                val lastVisibleItem = layoutManager.findLastVisibleItemPosition()
+                if (!isLoading && nextPageToken != null && lastVisibleItem >= totalItemCount - 5) {
+                    loadMoreTrending()
                 }
             }
         })
@@ -108,23 +121,49 @@ class HomeFragment : Fragment() {
     }
 
     private fun loadTrendingData() {
+        if (isLoading) return
+        isLoading = true
         viewLifecycleOwner.lifecycleScope.launch {
             // Try YouTube Data API first (real-time), fallback to bundled assets
-            val result = YouTubeApiClient.getTrending("MM", 20)
-            val videoList = if (result.isSuccess) {
-                result.getOrNull() ?: emptyList()
+            val result = YouTubeApiClient.getTrending("MM", 20, null)
+            isLoading = false
+            if (result.isSuccess) {
+                val (videos, token) = result.getOrNull() ?: Pair(emptyList(), null)
+                nextPageToken = token
+                videoList.clear()
+                videoList.addAll(videos)
             } else {
                 // Fallback to bundled trending.json
-                loadBundledTrending()
+                videoList.clear()
+                videoList.addAll(loadBundledTrending())
+                nextPageToken = null
             }
             if (videoList.isEmpty()) {
                 Toast.makeText(requireContext(), "Data မရပါ", Toast.LENGTH_SHORT).show()
                 return@launch
             }
-            binding.rvVideos.adapter = VideoAdapter(videoList,
+            videoAdapter = VideoAdapter(videoList,
                 onWatchClick = { video -> (activity as MainActivity).openVideoDetail(video.url, video.title, video.thumbnail, video.duration) },
-                onDownloadClick = { video -> DownloadDialogFragment.newInstance(video.url, video.title).show(childFragmentManager, "DownloadDialog") }
+                onDownloadClick = { video -> DownloadDialogFragment.newInstance(video.url, video.title, video.thumbnail, video.duration).show(childFragmentManager, "DownloadDialog") }
             )
+            binding.rvVideos.adapter = videoAdapter
+        }
+    }
+
+    private fun loadMoreTrending() {
+        val token = nextPageToken ?: return
+        if (isLoading) return
+        isLoading = true
+        viewLifecycleOwner.lifecycleScope.launch {
+            val result = YouTubeApiClient.getTrending("MM", 20, token)
+            isLoading = false
+            if (result.isSuccess) {
+                val (videos, newToken) = result.getOrNull() ?: Pair(emptyList(), null)
+                nextPageToken = newToken
+                val startPos = videoList.size
+                videoList.addAll(videos)
+                videoAdapter?.notifyItemRangeInserted(startPos, videos.size)
+            }
         }
     }
 

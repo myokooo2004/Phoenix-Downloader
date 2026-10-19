@@ -21,14 +21,19 @@ object YouTubeApiClient {
      * Fetch trending videos for a region.
      * @param regionCode ISO 3166-1 alpha-2 country code (e.g. "MM" for Myanmar, "US" for global)
      * @param maxResults 1-50
+     * @param pageToken Token for pagination (null for first page)
+     * @return Pair of (videos, nextPageToken)
      */
-    suspend fun getTrending(regionCode: String = "MM", maxResults: Int = 20): Result<List<VideoItem>> = withContext(Dispatchers.IO) {
+    suspend fun getTrending(regionCode: String = "MM", maxResults: Int = 20, pageToken: String? = null): Result<Pair<List<VideoItem>, String?>> = withContext(Dispatchers.IO) {
         try {
-            val urlStr = "$BASE_URL?part=snippet,contentDetails,statistics" +
+            var urlStr = "$BASE_URL?part=snippet,contentDetails,statistics" +
                     "&chart=mostPopular" +
                     "&regionCode=$regionCode" +
                     "&maxResults=${maxResults.coerceIn(1, 50)}" +
                     "&key=$API_KEY"
+            if (pageToken != null) {
+                urlStr += "&pageToken=$pageToken"
+            }
             val url = URL(urlStr)
             val conn = url.openConnection() as HttpURLConnection
             conn.requestMethod = "GET"
@@ -44,6 +49,7 @@ object YouTubeApiClient {
 
             val body = conn.inputStream.bufferedReader().readText()
             val json = JSONObject(body)
+            val nextPageToken = json.optString("nextPageToken", null)
             val items = json.getJSONArray("items")
             val videos = mutableListOf<VideoItem>()
             for (i in 0 until items.length()) {
@@ -71,7 +77,7 @@ object YouTubeApiClient {
                     )
                 )
             }
-            Result.success(videos)
+            Result.success(Pair(videos, nextPageToken))
         } catch (e: Exception) {
             Log.e(TAG, "getTrending failed", e)
             Result.failure(e)
@@ -98,4 +104,131 @@ object YouTubeApiClient {
             0
         }
     }
+
+    /**
+     * Fetch related videos for a video ID.
+     * Uses search.list with relatedToVideoId (100 quota units per call).
+     */
+    suspend fun getRelatedVideos(videoId: String, maxResults: Int = 20): Result<List<VideoItem>> = withContext(Dispatchers.IO) {
+        try {
+            val urlStr = "https://www.googleapis.com/youtube/v3/search" +
+                    "?part=snippet" +
+                    "&relatedToVideoId=$videoId" +
+                    "&type=video" +
+                    "&maxResults=${maxResults.coerceIn(1, 50)}" +
+                    "&key=$API_KEY"
+            val url = URL(urlStr)
+            val conn = url.openConnection() as HttpURLConnection
+            conn.requestMethod = "GET"
+            conn.connectTimeout = 15000
+            conn.readTimeout = 15000
+
+            val code = conn.responseCode
+            if (code != 200) {
+                return@withContext Result.failure(Exception("YouTube API error: $code"))
+            }
+
+            val body = conn.inputStream.bufferedReader().readText()
+            val json = JSONObject(body)
+            val items = json.getJSONArray("items")
+            val videos = mutableListOf<VideoItem>()
+            for (i in 0 until items.length()) {
+                val item = items.getJSONObject(i)
+                val idObj = item.getJSONObject("id")
+                val id = idObj.getString("videoId")
+                val snippet = item.getJSONObject("snippet")
+                val title = snippet.getString("title")
+                val thumbnails = snippet.getJSONObject("thumbnails")
+                val thumbObj = when {
+                    thumbnails.has("high") -> thumbnails.getJSONObject("high")
+                    thumbnails.has("medium") -> thumbnails.getJSONObject("medium")
+                    else -> thumbnails.getJSONObject("default")
+                }
+                val thumbUrl = thumbObj.getString("url")
+                videos.add(
+                    VideoItem(
+                        url = "https://www.youtube.com/watch?v=$id",
+                        title = title,
+                        thumbnail = thumbUrl,
+                        duration = 0
+                    )
+                )
+            }
+            Result.success(videos)
+        } catch (e: Exception) {
+            Log.e(TAG, "getRelatedVideos failed", e)
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Fetch top-level comments for a video.
+     * Uses commentThreads.list (1 quota unit per call).
+     */
+    suspend fun getComments(videoId: String, maxResults: Int = 20): Result<List<CommentItem>> = withContext(Dispatchers.IO) {
+        try {
+            val urlStr = "https://www.googleapis.com/youtube/v3/commentThreads" +
+                    "?part=snippet" +
+                    "&videoId=$videoId" +
+                    "&order=relevance" +
+                    "&maxResults=${maxResults.coerceIn(1, 100)}" +
+                    "&key=$API_KEY"
+            val url = URL(urlStr)
+            val conn = url.openConnection() as HttpURLConnection
+            conn.requestMethod = "GET"
+            conn.connectTimeout = 15000
+            conn.readTimeout = 15000
+
+            val code = conn.responseCode
+            if (code != 200) {
+                return@withContext Result.failure(Exception("YouTube API error: $code"))
+            }
+
+            val body = conn.inputStream.bufferedReader().readText()
+            val json = JSONObject(body)
+            val items = json.getJSONArray("items")
+            val comments = mutableListOf<CommentItem>()
+            for (i in 0 until items.length()) {
+                val item = items.getJSONObject(i)
+                val snippet = item.getJSONObject("snippet")
+                val topComment = snippet.getJSONObject("topLevelComment")
+                val commentSnippet = topComment.getJSONObject("snippet")
+                val author = commentSnippet.getString("authorDisplayName")
+                val text = commentSnippet.getString("textDisplay")
+                val likeCount = commentSnippet.optInt("likeCount", 0)
+                val authorAvatar = commentSnippet.optJSONObject("authorProfileImageUrl")?.optString("value", "")
+                    ?: ""
+                comments.add(CommentItem(author, text, likeCount, authorAvatar))
+            }
+            Result.success(comments)
+        } catch (e: Exception) {
+            Log.e(TAG, "getComments failed", e)
+            Result.failure(e)
+        }
+    }
+
+    /** Extract video ID from YouTube URL. */
+    fun extractVideoId(url: String): String? {
+        return try {
+            when {
+                url.contains("youtube.com/watch") -> {
+                    url.substringAfter("v=").substringBefore("&")
+                }
+                url.contains("youtu.be/") -> {
+                    url.substringAfter("youtu.be/").substringBefore("?").substringBefore("&")
+                }
+                else -> null
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
 }
+
+/** Data class for YouTube comments. */
+data class CommentItem(
+    val author: String,
+    val text: String,
+    val likeCount: Int,
+    val avatarUrl: String
+)

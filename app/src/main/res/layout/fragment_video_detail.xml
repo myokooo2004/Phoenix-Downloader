@@ -10,43 +10,18 @@
         android:layout_height="wrap_content"
         android:orientation="vertical">
 
-        <!-- Video thumbnail with play overlay -->
+        <!-- Video player (auto-play, embedded) -->
         <FrameLayout
-            android:id="@+id/detail_thumb_container"
             android:layout_width="match_parent"
             android:layout_height="210dp"
-            android:background="#000000"
-            android:clickable="true"
-            android:focusable="true"
-            android:foreground="?attr/selectableItemBackground">
+            android:background="#000000">
 
-            <ImageView
-                android:id="@+id/iv_detail_thumb"
+            <androidx.media3.ui.PlayerView
+                android:id="@+id/player_view"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
-                android:scaleType="centerCrop"
-                android:background="#1A1A1A" />
-
-            <ImageView
-                android:layout_width="64dp"
-                android:layout_height="64dp"
-                android:layout_gravity="center"
-                android:src="@android:drawable/ic_media_play"
-                android:alpha="0.9" />
-
-            <TextView
-                android:id="@+id/tv_detail_duration"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_gravity="bottom|end"
-                android:layout_margin="10dp"
-                android:background="#99000000"
-                android:paddingStart="6dp"
-                android:paddingEnd="6dp"
-                android:paddingTop="3dp"
-                android:paddingBottom="3dp"
-                android:textColor="@color/white"
-                android:textSize="11sp" />
+                app:show_buffering="when_playing"
+                app:use_controller="true" />
         </FrameLayout>
 
         <!-- Title + channel row -->

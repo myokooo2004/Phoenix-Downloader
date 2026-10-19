@@ -8,7 +8,8 @@ import android.view.ViewGroup
 import android.widget.Toast
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
-import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.GridLayoutManager
+import com.bumptech.glide.Glide
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
 import com.phoenix.downloader.core.DownloadService
 import com.phoenix.downloader.core.YtDlpManager
@@ -20,12 +21,16 @@ class DownloadDialogFragment : BottomSheetDialogFragment() {
     private val binding get() = _binding!!
     private var videoUrl = ""
     private var videoTitle = ""
+    private var videoThumbnail = ""
+    private var videoDuration = 0
     private var selectedFormatId = "best"
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         videoUrl = arguments?.getString("URL") ?: ""
         videoTitle = arguments?.getString("TITLE") ?: ""
+        videoThumbnail = arguments?.getString("THUMB") ?: ""
+        videoDuration = arguments?.getInt("DURATION") ?: 0
     }
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
@@ -36,6 +41,14 @@ class DownloadDialogFragment : BottomSheetDialogFragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         binding.tvDlgTitle.text = videoTitle
+        if (videoThumbnail.isNotEmpty()) {
+            Glide.with(this).load(videoThumbnail).into(binding.ivDlgThumb)
+        }
+        if (videoDuration > 0) {
+            val m = videoDuration / 60
+            val s = videoDuration % 60
+            binding.tvDlgDuration.text = "%d:%02d".format(m, s)
+        }
         fetchFormats()
         binding.btnDownload.setOnClickListener { startDownload() }
     }
@@ -54,13 +67,13 @@ class DownloadDialogFragment : BottomSheetDialogFragment() {
                 }
 
                 if (videoList.isNotEmpty()) {
-                    binding.tvVideoHeader.visibility = View.VISIBLE
-                    binding.rvVideoFormats.layoutManager = LinearLayoutManager(requireContext())
+                    binding.layoutVideoSection.visibility = View.VISIBLE
+                    binding.rvVideoFormats.layoutManager = GridLayoutManager(requireContext(), 2)
                     binding.rvVideoFormats.adapter = FormatAdapter(videoList) { selectedFormatId = it.id }
                 }
                 if (audioList.isNotEmpty()) {
-                    binding.tvAudioHeader.visibility = View.VISIBLE
-                    binding.rvAudioFormats.layoutManager = LinearLayoutManager(requireContext())
+                    binding.layoutMusicSection.visibility = View.VISIBLE
+                    binding.rvAudioFormats.layoutManager = GridLayoutManager(requireContext(), 2)
                     binding.rvAudioFormats.adapter = FormatAdapter(audioList) { selectedFormatId = it.id }
                 }
                 if (videoList.isEmpty() && audioList.isEmpty()) {
@@ -89,8 +102,13 @@ class DownloadDialogFragment : BottomSheetDialogFragment() {
     }
 
     companion object {
-        fun newInstance(url: String, title: String) = DownloadDialogFragment().apply {
-            arguments = Bundle().apply { putString("URL", url); putString("TITLE", title) }
+        fun newInstance(url: String, title: String, thumbnail: String = "", duration: Int = 0) = DownloadDialogFragment().apply {
+            arguments = Bundle().apply {
+                putString("URL", url)
+                putString("TITLE", title)
+                putString("THUMB", thumbnail)
+                putInt("DURATION", duration)
+            }
         }
     }
 }
