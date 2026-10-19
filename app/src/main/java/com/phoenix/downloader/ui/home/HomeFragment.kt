@@ -71,12 +71,8 @@ class HomeFragment : Fragment() {
         binding.btnOpenDownloads.setOnClickListener {
             (activity as? MainActivity)?.showDownloads()
         }
-
-        // Language button: tap to toggle, long-press to copy crash log
-        binding.btnLanguage.setOnClickListener {
-            toggleLanguage()
-        }
-        binding.btnLanguage.setOnLongClickListener {
+        // Long-press downloads button to copy crash log
+        binding.btnOpenDownloads.setOnLongClickListener {
             val log = com.phoenix.downloader.core.CrashLogger.getLog(requireContext())
             if (log != null) {
                 val truncated = if (log.length > 100_000) {
@@ -90,7 +86,6 @@ class HomeFragment : Fragment() {
             }
             true
         }
-        updateLangLabel()
 
         // Site buttons: open in-app browser
         binding.siteYoutube.setOnClickListener {
@@ -102,22 +97,6 @@ class HomeFragment : Fragment() {
         binding.siteTiktok.setOnClickListener {
             (activity as? MainActivity)?.openBrowser("https://www.tiktok.com")
         }
-    }
-
-    private fun toggleLanguage() {
-        val prefs = requireContext().getSharedPreferences("app_prefs", android.content.Context.MODE_PRIVATE)
-        val current = prefs.getString("language", "en") ?: "en"
-        val newLang = if (current == "en") "my" else "en"
-        prefs.edit().putString("language", newLang).apply()
-        updateLangLabel()
-        requireActivity().recreate()
-    }
-
-    private fun updateLangLabel() {
-        val prefs = requireContext().getSharedPreferences("app_prefs", android.content.Context.MODE_PRIVATE)
-        val current = prefs.getString("language", "en") ?: "en"
-        // Show "မြန်" when current is EN, "EN" when current is MY
-        binding.btnLanguage.text = if (current == "en") "မြန်" else "EN"
     }
 
     private fun loadTrendingData() {
