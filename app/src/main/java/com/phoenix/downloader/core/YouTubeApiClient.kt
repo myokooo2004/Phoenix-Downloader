@@ -14,6 +14,10 @@ import java.net.URL
  */
 object YouTubeApiClient {
     private const val TAG = "YouTubeApiClient"
+    // API proxied via Cloudflare Worker (keeps key server-side, adds edge caching).
+    // Worker handles regionCode quirks (e.g. YouTube rejects regionCode=MM).
+    private const val WORKER_BASE = "https://phoenix-downloader-api.myokooo2004.workers.dev"
+    // Legacy direct API (kept for reference; not used)
     private const val API_KEY = "AIzaSyDVpveH9BzSa7QZh7QT7Uh2zMasfEWR8Pw"
     private const val BASE_URL = "https://www.googleapis.com/youtube/v3/videos"
 
@@ -26,11 +30,8 @@ object YouTubeApiClient {
      */
     suspend fun getTrending(regionCode: String = "MM", maxResults: Int = 20, pageToken: String? = null): Result<Pair<List<VideoItem>, String?>> = withContext(Dispatchers.IO) {
         try {
-            var urlStr = "$BASE_URL?part=snippet,contentDetails,statistics" +
-                    "&chart=mostPopular" +
-                    "&regionCode=$regionCode" +
-                    "&maxResults=${maxResults.coerceIn(1, 50)}" +
-                    "&key=$API_KEY"
+            var urlStr = "$WORKER_BASE/trending?region=$regionCode" +
+                    "&maxResults=${maxResults.coerceIn(1, 50)}"
             if (pageToken != null) {
                 urlStr += "&pageToken=$pageToken"
             }
@@ -111,12 +112,9 @@ object YouTubeApiClient {
      */
     suspend fun getRelatedVideos(videoId: String, maxResults: Int = 20): Result<List<VideoItem>> = withContext(Dispatchers.IO) {
         try {
-            val urlStr = "https://www.googleapis.com/youtube/v3/search" +
-                    "?part=snippet" +
-                    "&relatedToVideoId=$videoId" +
-                    "&type=video" +
-                    "&maxResults=${maxResults.coerceIn(1, 50)}" +
-                    "&key=$API_KEY"
+            val urlStr = "$WORKER_BASE/related" +
+                    "?videoId=$videoId" +
+                    "&maxResults=${maxResults.coerceIn(1, 50)}"
             val url = URL(urlStr)
             val conn = url.openConnection() as HttpURLConnection
             conn.requestMethod = "GET"
@@ -169,12 +167,9 @@ object YouTubeApiClient {
      */
     suspend fun getComments(videoId: String, maxResults: Int = 20): Result<List<CommentItem>> = withContext(Dispatchers.IO) {
         try {
-            val urlStr = "https://www.googleapis.com/youtube/v3/commentThreads" +
-                    "?part=snippet" +
-                    "&videoId=$videoId" +
-                    "&order=relevance" +
-                    "&maxResults=${maxResults.coerceIn(1, 100)}" +
-                    "&key=$API_KEY"
+            val urlStr = "$WORKER_BASE/comments" +
+                    "?videoId=$videoId" +
+                    "&maxResults=${maxResults.coerceIn(1, 100)}"
             val url = URL(urlStr)
             val conn = url.openConnection() as HttpURLConnection
             conn.requestMethod = "GET"
