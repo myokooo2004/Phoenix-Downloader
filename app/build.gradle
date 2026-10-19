@@ -20,20 +20,20 @@ android {
         }
     }
 
-    buildTypes {
-        release {
-            minifyEnabled false
-            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
-            signingConfig signingConfigs.release
-        }
-    }
-
     signingConfigs {
         release {
             storeFile file(System.getenv("KEYSTORE_PATH") ?: "downloader-release.jks")
             storePassword System.getenv("STORE_PASSWORD") ?: "phoenix2026"
             keyAlias System.getenv("KEY_ALIAS") ?: "upload"
             keyPassword System.getenv("KEY_PASSWORD") ?: "phoenix2026"
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            signingConfig signingConfigs.release
         }
     }
 
