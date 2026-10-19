@@ -7,10 +7,15 @@ import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import android.widget.Toast
 import androidx.fragment.app.Fragment
+import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.phoenix.downloader.MainActivity
+import com.phoenix.downloader.adapter.VideoAdapter
+import com.phoenix.downloader.adapter.VideoItem
+import com.phoenix.downloader.core.YouTubeApiClient
 import com.phoenix.downloader.databinding.FragmentHomeBinding
 import com.phoenix.downloader.ui.download.DownloadDialogFragment
+import kotlinx.coroutines.launch
 import org.json.JSONObject
 
 class HomeFragment : Fragment() {
@@ -25,7 +30,19 @@ class HomeFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         binding.rvVideos.layoutManager = LinearLayoutManager(requireContext())
-        
+
+        // Hide search bar on scroll down, show on scroll up (Vidmate-style)
+        binding.rvVideos.addOnScrollListener(object : androidx.recyclerview.widget.RecyclerView.OnScrollListener() {
+            override fun onScrolled(recyclerView: androidx.recyclerview.widget.RecyclerView, dx: Int, dy: Int) {
+                super.onScrolled(recyclerView, dx, dy)
+                if (dy > 10) {
+                    binding.searchBarContainer.visibility = View.GONE
+                } else if (dy < -10) {
+                    binding.searchBarContainer.visibility = View.VISIBLE
+                }
+            }
+        })
+
         loadTrendingData()
         
         binding.etSearch.setOnEditorActionListener { _, actionId, _ ->
@@ -93,7 +110,28 @@ class HomeFragment : Fragment() {
     }
 
     private fun loadTrendingData() {
-        try {
+        viewLifecycleOwner.lifecycleScope.launch {
+            // Try YouTube Data API first (real-time), fallback to bundled assets
+            val result = YouTubeApiClient.getTrending("MM", 20)
+            val videoList = if (result.isSuccess) {
+                result.getOrNull() ?: emptyList()
+            } else {
+                // Fallback to bundled trending.json
+                loadBundledTrending()
+            }
+            if (videoList.isEmpty()) {
+                Toast.makeText(requireContext(), "Data မရပါ", Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+            binding.rvVideos.adapter = VideoAdapter(videoList,
+                onWatchClick = { video -> (activity as MainActivity).openPlayer(video.url, video.title) },
+                onDownloadClick = { video -> DownloadDialogFragment.newInstance(video.url, video.title).show(childFragmentManager, "DownloadDialog") }
+            )
+        }
+    }
+
+    private fun loadBundledTrending(): List<VideoItem> {
+        return try {
             val jsonString = requireContext().assets.open("trending.json").bufferedReader().use { it.readText() }
             val videosArray = JSONObject(jsonString).getJSONArray("videos")
             val videoList = mutableListOf<VideoItem>()
@@ -101,12 +139,9 @@ class HomeFragment : Fragment() {
                 val obj = videosArray.getJSONObject(i)
                 videoList.add(VideoItem(obj.getString("url"), obj.getString("title"), obj.getString("thumbnailUrl"), obj.getInt("duration")))
             }
-            binding.rvVideos.adapter = VideoAdapter(videoList, 
-                onWatchClick = { video -> (activity as MainActivity).openPlayer(video.url, video.title) },
-                onDownloadClick = { video -> DownloadDialogFragment.newInstance(video.url, video.title).show(childFragmentManager, "DownloadDialog") }
-            )
+            videoList
         } catch (e: Exception) {
-            Toast.makeText(requireContext(), "Data မရပါ", Toast.LENGTH_SHORT).show()
+            emptyList()
         }
     }
 

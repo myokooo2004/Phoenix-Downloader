@@ -29,6 +29,9 @@ object YtDlpManager {
             appContext = context.applicationContext
             YoutubeDL.getInstance().init(appContext!!)
             initialized = true
+            // CI bundles latest yt-dlp at build time, so we're ready immediately.
+            // In-app updater runs in background without blocking.
+            updateChecked = true
         }
     }
 
