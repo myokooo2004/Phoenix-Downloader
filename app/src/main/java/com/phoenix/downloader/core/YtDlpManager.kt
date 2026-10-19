@@ -103,6 +103,9 @@ object YtDlpManager {
                 )
             )
         } catch (e: Exception) {
+            appContext?.let { ctx ->
+                try { CrashLogger.logNonFatal(ctx, "YtDlpManager.fetchVideoInfo", e) } catch (_: Exception) { }
+            }
             Result.failure(e)
         }
     }
@@ -159,6 +162,9 @@ object YtDlpManager {
             }
             Result.success(FormatsResult(music = music, video = sortedVideo))
         } catch (e: Exception) {
+            appContext?.let { ctx ->
+                try { CrashLogger.logNonFatal(ctx, "YtDlpManager.fetchFormats", e) } catch (_: Exception) { }
+            }
             Result.failure(e)
         }
     }
@@ -177,6 +183,9 @@ object YtDlpManager {
             val streamUrl = response.out.lineSequence().firstOrNull()?.trim()
             Result.success(streamUrl?.ifEmpty { null })
         } catch (e: Exception) {
+            appContext?.let { ctx ->
+                try { CrashLogger.logNonFatal(ctx, "YtDlpManager.resolveStreamUrl", e) } catch (_: Exception) { }
+            }
             Result.failure(e)
         }
     }
