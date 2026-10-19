@@ -39,6 +39,12 @@ object YtDlpManager {
                 // FFmpeg init optional, log but don't fail
                 android.util.Log.w("YtDlpManager", "FFmpeg init failed", e)
             }
+            // Initialize Aria2c for multi-connection downloads
+            try {
+                com.yausername.aria2c.Aria2c.getInstance().init(appContext!!)
+            } catch (e: Exception) {
+                android.util.Log.w("YtDlpManager", "Aria2c init failed", e)
+            }
             initialized = true
             updateChecked = true
             initError = null

@@ -125,7 +125,9 @@ object YouTubeApiClient {
 
             val code = conn.responseCode
             if (code != 200) {
-                return@withContext Result.failure(Exception("YouTube API error: $code"))
+                val errorBody = try { conn.errorStream?.bufferedReader()?.readText() ?: "" } catch (e: Exception) { "" }
+                Log.e(TAG, "getRelatedVideos API error $code: $errorBody")
+                return@withContext Result.failure(Exception("YouTube API error: $code - $errorBody"))
             }
 
             val body = conn.inputStream.bufferedReader().readText()
@@ -181,7 +183,9 @@ object YouTubeApiClient {
 
             val code = conn.responseCode
             if (code != 200) {
-                return@withContext Result.failure(Exception("YouTube API error: $code"))
+                val errorBody = try { conn.errorStream?.bufferedReader()?.readText() ?: "" } catch (e: Exception) { "" }
+                Log.e(TAG, "getComments API error $code: $errorBody")
+                return@withContext Result.failure(Exception("YouTube API error: $code - $errorBody"))
             }
 
             val body = conn.inputStream.bufferedReader().readText()

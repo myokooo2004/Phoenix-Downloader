@@ -38,6 +38,9 @@ class DownloadService : Service() {
                 }
                 request.addOption("-f", formatSelector)
                 request.addOption("--merge-output-format", "mp4")
+                // Use aria2c for multi-connection faster downloads (4 connections to avoid blocks)
+                request.addOption("--external-downloader", "aria2c")
+                request.addOption("--external-downloader-args", "aria2c:-x 4 -s 4 -k 1M")
                 request.addOption("-o", outputTemplate)
                 request.addOption("--no-check-certificate")
                 request.addOption("--socket-timeout", "30")
