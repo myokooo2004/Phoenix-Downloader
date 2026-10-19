@@ -10,8 +10,6 @@ import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.phoenix.downloader.MainActivity
-import com.phoenix.downloader.adapter.VideoAdapter
-import com.phoenix.downloader.adapter.VideoItem
 import com.phoenix.downloader.core.YouTubeApiClient
 import com.phoenix.downloader.databinding.FragmentHomeBinding
 import com.phoenix.downloader.ui.download.DownloadDialogFragment

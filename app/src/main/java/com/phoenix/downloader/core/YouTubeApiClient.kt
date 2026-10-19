@@ -1,7 +1,7 @@
 package com.phoenix.downloader.core
 
 import android.util.Log
-import com.phoenix.downloader.adapter.VideoItem
+import com.phoenix.downloader.ui.home.VideoItem
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
