@@ -18,7 +18,7 @@ import kotlinx.coroutines.withContext
 object YtDlpManager {
 
     /** Set to false to test with the library's bundled yt-dlp only. */
-    private const val AUTO_UPDATE = true
+    private const val AUTO_UPDATE = false
 
     private var initialized = false
     private var updateChecked = false
