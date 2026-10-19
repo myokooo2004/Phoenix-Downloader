@@ -11,8 +11,8 @@ android {
         applicationId "com.phoenix.downloader"
         minSdk 24
         targetSdk 34
-        versionCode 1
-        versionName "1.0"
+        versionCode (System.getenv("BUILD_NUMBER")?.toInteger() ?: 1)
+        versionName "1.0.${System.getenv("BUILD_NUMBER") ?: 1}"
     }
 
     signingConfigs {
