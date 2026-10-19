@@ -56,6 +56,23 @@ object CrashLogger {
         file.appendText(entry)
     }
 
+    /** Log a non-fatal exception with full stack trace (for diagnostics). */
+    fun logNonFatal(context: Context, tag: String, throwable: Throwable) {
+        val file = File(context.filesDir, CRASH_FILE)
+        if (file.exists() && file.length() > MAX_SIZE_BYTES) {
+            file.delete()
+        }
+        val timestamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date())
+        val sw = StringWriter()
+        throwable.printStackTrace(PrintWriter(sw))
+        val entry = buildString {
+            appendLine("=== NON-FATAL $timestamp [$tag] ===")
+            appendLine(sw.toString())
+            appendLine()
+        }
+        file.appendText(entry)
+    }
+
     /** Returns the crash log content, or null if empty/missing. */
     fun getLog(context: Context): String? {
         return try {

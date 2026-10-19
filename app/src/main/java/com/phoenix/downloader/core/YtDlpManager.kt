@@ -38,6 +38,12 @@ object YtDlpManager {
                 initError = null
             } catch (e: Exception) {
                 initError = e
+                // Log full stack trace for diagnostics (user can copy via long-press)
+                appContext?.let { ctx ->
+                    try {
+                        CrashLogger.logNonFatal(ctx, "YtDlpManager.init", e)
+                    } catch (_: Exception) { }
+                }
             }
         }
     }
