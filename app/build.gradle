@@ -15,7 +15,7 @@ android {
         versionName "1.0.${System.getenv("BUILD_NUMBER") ?: 1}"
     }
 
-    packagingOptions {
+    packaging {
         jniLibs {
             useLegacyPackaging = true
         }
