@@ -29,7 +29,15 @@ class DownloadService : Service() {
                 val outputTemplate = "$outputDir/$safeTitle.%(ext)s"
 
                 val request = YoutubeDLRequest(url)
-                request.addOption("-f", formatId)
+                // For video formats, merge with best audio using ffmpeg
+                // Format: "<videoId>+bestaudio/best" ensures audio is included
+                val formatSelector = if (formatId != "best" && !formatId.contains("+")) {
+                    "$formatId+bestaudio/best"
+                } else {
+                    formatId
+                }
+                request.addOption("-f", formatSelector)
+                request.addOption("--merge-output-format", "mp4")
                 request.addOption("-o", outputTemplate)
                 request.addOption("--no-check-certificate")
                 request.addOption("--socket-timeout", "30")

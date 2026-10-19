@@ -32,6 +32,13 @@ object YtDlpManager {
         try {
             appContext = context.applicationContext
             YoutubeDL.getInstance().init(appContext!!)
+            // Initialize FFmpeg for audio/video merging (4K downloads)
+            try {
+                com.yausername.ffmpeg.FFmpeg.getInstance().init(appContext!!)
+            } catch (e: Exception) {
+                // FFmpeg init optional, log but don't fail
+                android.util.Log.w("YtDlpManager", "FFmpeg init failed", e)
+            }
             initialized = true
             updateChecked = true
             initError = null

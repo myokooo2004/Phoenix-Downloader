@@ -155,9 +155,13 @@ class VideoDetailFragment : Fragment() {
         val videoId = YouTubeApiClient.extractVideoId(videoUrl) ?: return
         viewLifecycleOwner.lifecycleScope.launch {
             val result = YouTubeApiClient.getComments(videoId, 20)
-            // TODO: Display comments in RecyclerView (needs CommentAdapter)
-            // For now, comments are fetched but UI shows placeholder
-            // This will be implemented with a proper adapter
+            if (result.isSuccess) {
+                val comments = result.getOrNull() ?: emptyList()
+                if (comments.isNotEmpty()) {
+                    binding.rvComments.layoutManager = LinearLayoutManager(requireContext())
+                    binding.rvComments.adapter = CommentAdapter(comments)
+                }
+            }
         }
     }
 
