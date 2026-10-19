@@ -19,6 +19,8 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         // Crash logger first (catches everything after this point)
         com.phoenix.downloader.core.CrashLogger.init(this)
+        // yt-dlp init (must be called or isReady() stays false)
+        com.phoenix.downloader.core.YtDlpManager.init(this)
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
