@@ -126,6 +126,15 @@ class BrowserFragment : Fragment() {
             viewLifecycleOwner.lifecycleScope.launch {
                 YtDlpManager.fetchVideoInfo(url)
                     .onSuccess { DownloadDialogFragment.newInstance(it.url, it.title).show(parentFragmentManager, "DownloadDialog") }
+                    .onFailure {
+                        context?.let { ctx ->
+                            android.widget.Toast.makeText(
+                                ctx,
+                                it.message ?: "Could not fetch video",
+                                android.widget.Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                    }
             }
         }
 
