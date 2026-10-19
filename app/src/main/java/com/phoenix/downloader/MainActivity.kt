@@ -20,11 +20,16 @@ class MainActivity : AppCompatActivity() {
         // Crash logger first (catches everything after this point)
         com.phoenix.downloader.core.CrashLogger.init(this)
         super.onCreate(savedInstanceState)
-        // yt-dlp init (must be called or isReady() stays false) - safe in try-catch
-        try {
-            com.phoenix.downloader.core.YtDlpManager.init(this)
-        } catch (e: Exception) {
-            android.util.Log.e("MainActivity", "YtDlpManager init failed", e)
+        // yt-dlp init (must be called or isReady() stays false).
+        // Failures are surfaced to the user, never silent (see YtDlpManager.getInitError).
+        com.phoenix.downloader.core.YtDlpManager.init(this)
+        com.phoenix.downloader.core.YtDlpManager.getInitError()?.let { err ->
+            android.util.Log.e("MainActivity", "YtDlpManager init failed", err)
+            android.widget.Toast.makeText(
+                this,
+                "yt-dlp init failed: ${err.message}",
+                android.widget.Toast.LENGTH_LONG
+            ).show()
         }
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)

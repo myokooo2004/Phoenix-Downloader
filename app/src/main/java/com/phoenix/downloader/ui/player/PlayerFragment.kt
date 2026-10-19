@@ -4,11 +4,15 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.Toast
 import androidx.fragment.app.Fragment
+import androidx.lifecycle.lifecycleScope
 import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.ExoPlayer
+import com.phoenix.downloader.core.YtDlpManager
 import com.phoenix.downloader.databinding.FragmentPlayerBinding
 import com.phoenix.downloader.ui.download.DownloadDialogFragment
+import kotlinx.coroutines.launch
 
 class PlayerFragment : Fragment() {
     private var _binding: FragmentPlayerBinding? = null
@@ -34,9 +38,25 @@ class PlayerFragment : Fragment() {
         
         exoPlayer = ExoPlayer.Builder(requireContext()).build()
         binding.playerView.player = exoPlayer
-        exoPlayer?.setMediaItem(MediaItem.fromUri(videoUrl))
-        exoPlayer?.prepare()
-        exoPlayer?.play()
+
+        // A YouTube watch URL is a web page, not a media stream — ExoPlayer
+        // cannot play it directly. Resolve the direct stream URL via yt-dlp
+        // first (same engine the download flow uses).
+        Toast.makeText(requireContext(), "Loading video...", Toast.LENGTH_SHORT).show()
+        viewLifecycleOwner.lifecycleScope.launch {
+            val result = YtDlpManager.resolveStreamUrl(videoUrl)
+            result.onSuccess { streamUrl ->
+                if (!streamUrl.isNullOrEmpty()) {
+                    exoPlayer?.setMediaItem(MediaItem.fromUri(streamUrl))
+                    exoPlayer?.prepare()
+                    exoPlayer?.play()
+                } else {
+                    Toast.makeText(requireContext(), "Could not resolve video stream", Toast.LENGTH_LONG).show()
+                }
+            }.onFailure { e ->
+                Toast.makeText(requireContext(), "Play failed: ${e.message}", Toast.LENGTH_LONG).show()
+            }
+        }
 
         binding.btnPlayerBack.setOnClickListener { requireActivity().supportFragmentManager.popBackStack() }
         binding.btnPlayerDownload.setOnClickListener {

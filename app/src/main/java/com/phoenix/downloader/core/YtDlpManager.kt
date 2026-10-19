@@ -22,20 +22,43 @@ object YtDlpManager {
     private var initialized = false
     private var updateChecked = false
     private var appContext: Context? = null
+    /** Set when init() throws — the real reason fetches fail (never silent). */
+    private var initError: Throwable? = null
 
     /** Must be called once from Application.onCreate(). */
     fun init(context: Context) {
         if (!initialized) {
-            appContext = context.applicationContext
-            YoutubeDL.getInstance().init(appContext!!)
-            initialized = true
-            // CI bundles latest yt-dlp at build time, so we're ready immediately.
-            // In-app updater runs in background without blocking.
-            updateChecked = true
+            try {
+                appContext = context.applicationContext
+                YoutubeDL.getInstance().init(appContext!!)
+                initialized = true
+                // CI bundles latest yt-dlp at build time, so we're ready immediately.
+                // In-app updater runs in background without blocking.
+                updateChecked = true
+                initError = null
+            } catch (e: Exception) {
+                initError = e
+            }
         }
     }
 
     fun isInitialized(): Boolean = initialized
+
+    /** The exception from init(), or null if init succeeded (or never ran). */
+    fun getInitError(): Throwable? = initError
+
+    /** Retry init() after a failure (e.g. from a "tap to retry" UI). */
+    fun retryInit(context: Context) {
+        initError = null
+        initialized = false
+        updateChecked = false
+        init(context)
+    }
+
+    /** Human-readable reason fetches are failing — for error UI, not logcat-only. */
+    fun notReadyReason(): String =
+        initError?.let { "yt-dlp init failed: ${it.message}" }
+            ?: "yt-dlp not initialized yet, please wait..."
     
     /** True when init AND update check both completed - safe to use for downloads */
     fun isReady(): Boolean = initialized && updateChecked
@@ -45,7 +68,7 @@ object YtDlpManager {
     /** Step 1: resolve a video URL to its info (thumbnail, title, duration). */
     suspend fun fetchVideoInfo(url: String): Result<VideoInfo> = withContext(Dispatchers.IO) {
         try {
-            if (!isReady()) return@withContext Result.failure(Exception("yt-dlp updating, please wait..."))
+            if (!isReady()) return@withContext Result.failure(Exception(notReadyReason()))
             val request = YoutubeDLRequest(url)
             request.addOption("--dump-json")
             request.addOption("--no-download")
@@ -88,7 +111,7 @@ object YtDlpManager {
      */
     suspend fun fetchFormats(url: String): Result<FormatsResult> = withContext(Dispatchers.IO) {
         try {
-            if (!isReady()) return@withContext Result.failure(Exception("yt-dlp updating, please wait..."))
+            if (!isReady()) return@withContext Result.failure(Exception(notReadyReason()))
             val request = YoutubeDLRequest(url)
             request.addOption("--dump-json")
             request.addOption("--no-download")
@@ -158,7 +181,7 @@ object YtDlpManager {
      */
     suspend fun resolveStreamUrl(url: String): Result<String?> = withContext(Dispatchers.IO) {
         try {
-            if (!isReady()) return@withContext Result.failure(Exception("yt-dlp updating, please wait..."))
+            if (!isReady()) return@withContext Result.failure(Exception(notReadyReason()))
             val request = YoutubeDLRequest(url)
             request.addOption("-g")
             request.addOption("-f")
