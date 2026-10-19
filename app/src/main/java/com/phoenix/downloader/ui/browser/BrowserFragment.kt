@@ -149,7 +149,8 @@ class BrowserFragment : Fragment() {
     private fun checkForVideo(url: String) {
         val site = UrlDetector.detect(url)
         pendingVideoUrl = if (site != null) url else null
-        binding.fabDownload.isVisible = pendingVideoUrl != null
+        // FAB disabled - user wants per-video buttons only, not FAB
+        binding.fabDownload.isVisible = false
         binding.tvDetectHint.isVisible = pendingVideoUrl != null
     }
 
