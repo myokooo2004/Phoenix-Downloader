@@ -19,6 +19,7 @@ class DownloadService : Service() {
         val url = intent?.getStringExtra("URL") ?: return START_NOT_STICKY
         val formatId = intent.getStringExtra("FORMAT_ID") ?: "best"
         val title = intent.getStringExtra("TITLE") ?: "Downloading..."
+        val client = intent.getStringExtra("CLIENT")
 
         startForeground(1, buildNotification("Preparing...", 0))
 
@@ -26,13 +27,19 @@ class DownloadService : Service() {
             try {
                 CrashLogger.logNonFatal(
                     this@DownloadService, "DownloadService",
-                    Exception("start url=$url format=$formatId title=$title")
+                    Exception("start url=$url format=$formatId client=${client ?: "default"} title=$title")
                 )
                 val outputDir = getExternalFilesDir(null)?.absolutePath ?: filesDir.absolutePath
                 val safeTitle = title.replace(Regex("[\\\\/:*?\"<>|]"), "_").take(100)
                 val outputTemplate = "$outputDir/$safeTitle.%(ext)s"
 
                 val request = YoutubeDLRequest(url)
+                // Use the same player_client that produced the format list in
+                // the dialog (format ids/clients are linked; the default
+                // android_vr set caps at 360p without a PO token).
+                if (!client.isNullOrEmpty()) {
+                    request.addOption("--extractor-args", "youtube:player_client=$client")
+                }
                 // Cookies (WebView-synced) — same as YtDlpManager.baseRequest.
                 // Without them the actual download hit bot-checks that the
                 // format fetch (which HAS cookies) passed.

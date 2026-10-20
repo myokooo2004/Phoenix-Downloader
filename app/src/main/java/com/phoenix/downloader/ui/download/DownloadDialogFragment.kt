@@ -24,6 +24,7 @@ class DownloadDialogFragment : BottomSheetDialogFragment() {
     private var videoThumbnail = ""
     private var videoDuration = 0
     private var selectedFormatId = "best"
+    private var formatsClient: String? = null
     private var videoAdapterRef: FormatAdapter? = null
     private var audioAdapterRef: FormatAdapter? = null
 
@@ -79,6 +80,7 @@ class DownloadDialogFragment : BottomSheetDialogFragment() {
             val result = YtDlpManager.fetchFormats(videoUrl)
             binding.tvFetching.visibility = View.GONE
             result.onSuccess { formatsResult ->
+                formatsClient = formatsResult.clientUsed
                 val videoList = mutableListOf<FormatInfo>()
                 // Offer EVERY video format yt-dlp returns (up to 4K/8K),
                 // each as an MP4 or MKV output container. The SOURCE may be
@@ -131,6 +133,9 @@ class DownloadDialogFragment : BottomSheetDialogFragment() {
             putExtra("URL", videoUrl)
             putExtra("TITLE", videoTitle)
             putExtra("FORMAT_ID", selectedFormatId)
+            // Download with the same player_client that produced the format
+            // list (e.g. tv / web_safari when the default capped at 360p).
+            formatsClient?.let { putExtra("CLIENT", it) }
         }
         ContextCompat.startForegroundService(requireContext(), intent)
         dismiss()

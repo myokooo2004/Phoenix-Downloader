@@ -196,11 +196,50 @@ object YtDlpManager {
         }
     }
 
-    /** Step 2: list downloadable formats, split into music and video. */
+    /**
+     * Step 2: list downloadable formats, split into music and video.
+     *
+     * Client retry chain: the default client set (android_vr-led) is known to
+     * return a 360p-capped list because android_vr withholds HTTPS formats
+     * that need a GVS PO token. If the default attempt tops out below 720p,
+     * retry with token-free clients (tv, then web_safari) and keep whichever
+     * attempt produced the richest list, so 4K shows when the video has it.
+     */
     suspend fun fetchFormats(url: String): Result<FormatsResult> = withContext(Dispatchers.IO) {
         try {
             if (!isReady()) return@withContext Result.failure(Exception(notReadyReason()))
+            val clients = listOf<String?>(null, "tv", "web_safari")
+            var best: FormatsResult? = null
+            for (client in clients) {
+                val attempt = try {
+                    fetchFormatsOnce(url, client)
+                } catch (e: Exception) {
+                    logNote("fetchFormats.attempt", "client=${client ?: "default"} failed: ${e.message}")
+                    null
+                } ?: continue
+                val current = best
+                if (current == null ||
+                    attempt.maxHeight > current.maxHeight ||
+                    (attempt.maxHeight == current.maxHeight && attempt.video.size > current.video.size)
+                ) {
+                    best = attempt
+                }
+                if (attempt.maxHeight >= 720) break
+            }
+            val winner = best ?: return@withContext Result.failure(Exception("No formats found"))
+            Result.success(winner)
+        } catch (e: Exception) {
+            logFailure("fetchFormats", e)
+            Result.failure(e)
+        }
+    }
+
+    private suspend fun fetchFormatsOnce(url: String, client: String?): FormatsResult =
+        withContext(Dispatchers.IO) {
             val request = baseRequest(url)
+            if (client != null) {
+                request.addOption("--extractor-args", "youtube:player_client=$client")
+            }
             request.addOption("--dump-json")
             request.addOption("--no-download")
             val response = YoutubeDL.getInstance().execute(request)
@@ -208,6 +247,7 @@ object YtDlpManager {
 
             val music = mutableListOf<FormatOption>()
             val video = mutableListOf<FormatOption>()
+            var maxHeight = 0
             val arr = json.optJSONArray("formats") ?: org.json.JSONArray()
 
             for (i in 0 until arr.length()) {
@@ -221,6 +261,7 @@ object YtDlpManager {
 
                 val height = f.optInt("height", 0)
                 val isAudioOnly = vcodec == "none" && acodec != "none"
+                if (!isAudioOnly && height > maxHeight) maxHeight = height
 
                 val label = if (isAudioOnly) {
                     val abr = f.optInt("abr", 0)
@@ -246,21 +287,27 @@ object YtDlpManager {
             val sortedVideo = video.sortedBy {
                 it.label.filter { c -> c.isDigit() }.toIntOrNull() ?: 0
             }
-            // Diagnostic: exactly which formats yt-dlp returned (proves whether
-            // >360p / non-MP4 formats exist for a given video). Lands in crash.log.
-            val allVideo = (music + sortedVideo)
+            val errText = response.err ?: ""
+            val poNote = when {
+                errText.contains("PO Token", ignoreCase = true) -> " PO-TOKEN-warning"
+                errText.contains("skipped", ignoreCase = true) -> " skipped-formats"
+                else -> ""
+            }
+            // Diagnostic: per-attempt proof of what each client returned.
             logNote(
                 "fetchFormats.list",
-                "url=$url audio=${music.size} video=${sortedVideo.size} " +
-                    "videoFormats=[" + sortedVideo.joinToString(", ") { "${it.label}/${it.format}/${it.id}" } + "] " +
-                    "audioFormats=[" + music.joinToString(", ") { "${it.label}/${it.format}/${it.id}" } + "] total=${allVideo.size}"
+                "client=${client ?: "default"} url=$url maxHeight=$maxHeight " +
+                    "video=${sortedVideo.size} [" +
+                    sortedVideo.joinToString(", ") { "${it.label}/${it.format}/${it.id}" } +
+                    "] audio=${music.size}$poNote"
             )
-            Result.success(FormatsResult(music = music, video = sortedVideo))
-        } catch (e: Exception) {
-            logFailure("fetchFormats", e)
-            Result.failure(e)
+            FormatsResult(
+                music = music,
+                video = sortedVideo,
+                maxHeight = maxHeight,
+                clientUsed = client
+            )
         }
-    }
 
     /**
      * Resolve ONE direct playable URL (video + audio together) for ExoPlayer.
@@ -333,6 +380,9 @@ object YtDlpManager {
 
     data class FormatsResult(
         val music: List<FormatOption>,
-        val video: List<FormatOption>
+        val video: List<FormatOption>,
+        val maxHeight: Int = 0,
+        /** yt-dlp player_client that produced this list (null = library default). */
+        val clientUsed: String? = null
     )
 }
