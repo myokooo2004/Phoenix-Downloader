@@ -80,9 +80,11 @@ class DownloadDialogFragment : BottomSheetDialogFragment() {
             binding.tvFetching.visibility = View.GONE
             result.onSuccess { formatsResult ->
                 val videoList = mutableListOf<FormatInfo>()
-                // For each MP4-sourced video quality, offer MP4 and MKV containers.
-                // WEBM sources excluded (user does not want WEBM).
-                for (f in formatsResult.video.filter { it.format == "MP4" }) {
+                // Offer EVERY video format yt-dlp returns (up to 4K/8K),
+                // each as an MP4 or MKV output container. The SOURCE may be
+                // WEBM/VP9 (the only form 4K comes in) — the file the user
+                // receives is still MP4/MKV via --merge-output-format.
+                for (f in formatsResult.video) {
                     videoList.add(FormatInfo(f.id, "${f.label} (MP4)", f.sizeLabel, false))
                     videoList.add(FormatInfo("${f.id}|MKV", "${f.label} (MKV)", f.sizeLabel, false))
                 }
