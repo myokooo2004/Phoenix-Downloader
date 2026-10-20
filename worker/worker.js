@@ -63,14 +63,22 @@ async function handleRequest(request) {
     const region = url.searchParams.get("region") || "MM";
     const maxResults = Math.min(parseInt(url.searchParams.get("maxResults") || "20", 10), 50);
     const pageToken = url.searchParams.get("pageToken");
-    // Note: YouTube rejects regionCode=MM for mostPopular; omit it for MM
-    let api = `${YT_BASE}/videos?part=snippet,contentDetails,statistics&chart=mostPopular&maxResults=${maxResults}&key=${key}`;
-    if (region && region !== "MM") {
+    let api;
+    if (region === "MM") {
+      // YouTube rejects regionCode=MM for mostPopular chart.
+      // Use search for Myanmar music videos instead (real, live data).
+      api = `${YT_BASE}/search?part=snippet&q=${encodeURIComponent("Myanmar music")}&type=video&maxResults=${maxResults}&key=${key}`;
+      if (pageToken) api += `&pageToken=${encodeURIComponent(pageToken)}`;
+      // Search results change; cache 30 minutes
+      return ytFetch(api, 1800);
+    } else {
+      // For other regions, use the trending chart
+      api = `${YT_BASE}/videos?part=snippet,contentDetails,statistics&chart=mostPopular&maxResults=${maxResults}&key=${key}`;
       api += `&regionCode=${encodeURIComponent(region)}`;
+      if (pageToken) api += `&pageToken=${encodeURIComponent(pageToken)}`;
+      // Trending changes slowly; cache 15 minutes
+      return ytFetch(api, 900);
     }
-    if (pageToken) api += `&pageToken=${encodeURIComponent(pageToken)}`;
-    // Trending changes slowly; cache 15 minutes
-    return ytFetch(api, 900);
   }
 
   if (path === "/related") {

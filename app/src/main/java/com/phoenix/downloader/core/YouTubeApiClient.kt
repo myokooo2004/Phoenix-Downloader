@@ -55,7 +55,16 @@ object YouTubeApiClient {
             val videos = mutableListOf<VideoItem>()
             for (i in 0 until items.length()) {
                 val item = items.getJSONObject(i)
-                val id = item.getString("id")
+                // Handle both videos.list (id is string) and search.list (id.videoId) formats
+                val id = try {
+                    item.getString("id")
+                } catch (e: Exception) {
+                    try {
+                        item.getJSONObject("id").getString("videoId")
+                    } catch (e2: Exception) {
+                        continue
+                    }
+                }
                 val snippet = item.getJSONObject("snippet")
                 val title = snippet.getString("title")
                 val thumbnails = snippet.getJSONObject("thumbnails")
@@ -66,9 +75,14 @@ object YouTubeApiClient {
                     else -> thumbnails.getJSONObject("default")
                 }
                 val thumbUrl = thumbObj.getString("url")
-                val contentDetails = item.getJSONObject("contentDetails")
-                val durationIso = contentDetails.optString("duration", "")
-                val durationSec = parseIso8601Duration(durationIso)
+                // contentDetails only in videos.list; search.list has no duration
+                val durationSec = try {
+                    val contentDetails = item.getJSONObject("contentDetails")
+                    val durationIso = contentDetails.optString("duration", "")
+                    parseIso8601Duration(durationIso)
+                } catch (e: Exception) {
+                    0
+                }
                 videos.add(
                     VideoItem(
                         url = "https://www.youtube.com/watch?v=$id",
