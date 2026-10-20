@@ -104,6 +104,8 @@ class BrowserFragment : Fragment() {
                 // Catches SPA pushState/replaceState navigations
                 binding.tvUrl.text = url
                 checkForVideo(url)
+                // Re-inject per-video download buttons after SPA navigation
+                injectDownloadButtons(view)
             }
         }
         wv.webChromeClient = object : WebChromeClient() {
@@ -159,48 +161,61 @@ class BrowserFragment : Fragment() {
         val js = """
             (function() {
                 function addButtons() {
-                    // YouTube: video links in lists
-                    var links = document.querySelectorAll('a[href*="/watch?v="]:not([data-phoenix-btn])');
+                    var links = document.querySelectorAll('a[href*="/watch?v="]');
+                    var added = 0;
                     links.forEach(function(link) {
-                        link.setAttribute('data-phoenix-btn', '1');
                         var href = link.getAttribute('href');
                         if (!href) return;
-                        var fullUrl = href.startsWith('http') ? href : 'https://www.youtube.com' + href;
-                        
-                        // Create download button
+                        var m = href.match(/v=([\w-]{11})/);
+                        if (!m) return;
+                        var vid = m[1];
+                        // Attach to the video renderer container (mobile + desktop layouts),
+                        // not inside the <a> (mobile anchors are unreliable click/position targets).
+                        var container = link.closest('ytm-video-with-context-renderer, ytm-media-item, ytm-compact-video-renderer, ytd-rich-item-renderer, ytd-video-renderer, ytd-compact-video-renderer, ytd-grid-video-renderer') || link.parentElement;
+                        if (!container) return;
+                        if (container.querySelector('[data-phoenix-btn]')) return;
+                        var style = window.getComputedStyle(container);
+                        if (style.position === 'static') {
+                            container.style.position = 'relative';
+                        }
+                        var fullUrl = 'https://www.youtube.com/watch?v=' + vid;
                         var btn = document.createElement('div');
+                        btn.setAttribute('data-phoenix-btn', '1');
                         btn.innerHTML = '⬇';
-                        btn.style.cssText = 'position:absolute;top:4px;right:4px;width:32px;height:32px;' +
+                        btn.style.cssText = 'position:absolute;top:8px;right:8px;width:36px;height:36px;' +
                             'background:#e53935;color:white;border-radius:50%;display:flex;' +
-                            'align-items:center;justify-content:center;font-size:18px;z-index:9999;' +
-                            'cursor:pointer;box-shadow:0 2px 4px rgba(0,0,0,0.3);';
-                        btn.onclick = function(e) {
+                            'align-items:center;justify-content:center;font-size:20px;z-index:2147483647;' +
+                            'cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,0.4);';
+                        btn.addEventListener('click', function(e) {
                             e.stopPropagation();
                             e.preventDefault();
                             PhoenixDownloader.onDownloadClick(fullUrl);
-                        };
-                        
-                        // Position relative to parent
-                        var parent = link;
-                        var style = window.getComputedStyle(parent);
-                        if (style.position === 'static') {
-                            parent.style.position = 'relative';
-                        }
-                        parent.appendChild(btn);
+                        }, true);
+                        container.appendChild(btn);
+                        added++;
                     });
+                    return added;
                 }
-                
-                // Run now and on DOM changes (for infinite scroll)
-                // Use per-call guard via data attribute, not window flag (allows re-injection on nav)
-                addButtons();
+                var n = addButtons();
                 if (!window._phoenixObserver) {
                     var observer = new MutationObserver(function() { addButtons(); });
                     observer.observe(document.body, { childList: true, subtree: true });
                     window._phoenixObserver = observer;
                 }
+                return n;
             })();
         """.trimIndent()
-        webView.evaluateJavascript(js, null)
+        webView.evaluateJavascript(js) { result ->
+            try {
+                webView.context?.let { ctx ->
+                    com.phoenix.downloader.core.CrashLogger.logNonFatal(
+                        ctx,
+                        "BrowserButtons",
+                        Exception("injectDownloadButtons added=$result url=${webView.url}")
+                    )
+                }
+            } catch (e: Exception) { /* diagnostics only */ }
+        }
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
