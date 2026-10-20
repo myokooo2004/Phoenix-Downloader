@@ -24,9 +24,9 @@ class DownloadDialogFragment : BottomSheetDialogFragment() {
     private var videoThumbnail = ""
     private var videoDuration = 0
     private var selectedFormatId = "best"
+    private var selectedHeight = 0
+    private var selectedContainer = "MP4"
     private var formatsClient: String? = null
-    private var videoAdapterRef: FormatAdapter? = null
-    private var audioAdapterRef: FormatAdapter? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -81,46 +81,44 @@ class DownloadDialogFragment : BottomSheetDialogFragment() {
             binding.tvFetching.visibility = View.GONE
             result.onSuccess { formatsResult ->
                 formatsClient = formatsResult.clientUsed
-                val videoList = mutableListOf<FormatInfo>()
-                // Offer EVERY video format yt-dlp returns (up to 4K/8K),
-                // each as an MP4 or MKV output container. The SOURCE may be
-                // WEBM/VP9 (the only form 4K comes in) — the file the user
-                // receives is still MP4/MKV via --merge-output-format.
+                // Build ONE row list: section headers + entries.
+                val rows = mutableListOf<FormatRow>()
+                rows.add(FormatRow.Section("🎵 " + getString(com.phoenix.downloader.R.string.section_music)))
+                rows.add(FormatRow.Entry(FormatInfo("MP3_128", "128K (MP3)", "~3MB", true), 0, "MP3"))
+                rows.add(FormatRow.Entry(FormatInfo("MP3_192", "192K (MP3)", "~5MB", true), 0, "MP3"))
+                rows.add(FormatRow.Entry(FormatInfo("MP3_320", "320K (MP3)", "~8MB", true), 0, "MP3"))
+                rows.add(FormatRow.Section("🎬 " + getString(com.phoenix.downloader.R.string.section_video)))
+                var firstVideoEntryIndex = -1
+                // Offer EVERY video format yt-dlp returns (up to 4K/8K), each
+                // as an MP4 or MKV output container. The SOURCE may be WEBM/VP9
+                // (the only form 4K comes in) — the file the user receives is
+                // still MP4/MKV via --merge-output-format.
                 for (f in formatsResult.video) {
-                    videoList.add(FormatInfo(f.id, "${f.label} (MP4)", f.sizeLabel, false))
-                    videoList.add(FormatInfo("${f.id}|MKV", "${f.label} (MKV)", f.sizeLabel, false))
+                    val height = f.label.filter { c -> c.isDigit() }.toIntOrNull() ?: 0
+                    if (firstVideoEntryIndex < 0) firstVideoEntryIndex = rows.size
+                    rows.add(FormatRow.Entry(FormatInfo(f.id, "${f.label} (MP4)", f.sizeLabel, false), height, "MP4"))
+                    rows.add(FormatRow.Entry(FormatInfo("${f.id}|MKV", "${f.label} (MKV)", f.sizeLabel, false), height, "MKV"))
                 }
-                val audioList = mutableListOf<FormatInfo>()
-                // MP3 only (user does not want WEBM/M4A raw formats)
-                audioList.add(FormatInfo("MP3_128", "128K (MP3)", "~3MB", true))
-                audioList.add(FormatInfo("MP3_192", "192K (MP3)", "~5MB", true))
-                audioList.add(FormatInfo("MP3_320", "320K (MP3)", "~8MB", true))
-
-                if (videoList.isNotEmpty()) {
-                    binding.layoutVideoSection.visibility = View.VISIBLE
-                    binding.rvVideoFormats.layoutManager = GridLayoutManager(requireContext(), 2)
-                    val videoAdapter = FormatAdapter(videoList) { chosen ->
-                        selectedFormatId = chosen.id
-                        audioAdapterRef?.clearSelection()
-                    }
-                    videoAdapterRef = videoAdapter
-                    binding.rvVideoFormats.adapter = videoAdapter
-                    // Default selection: first video format only (VidMate-style).
-                    videoAdapter.preselect(0)
-                    selectedFormatId = videoList[0].id
-                }
-                if (audioList.isNotEmpty()) {
-                    binding.layoutMusicSection.visibility = View.VISIBLE
-                    binding.rvAudioFormats.layoutManager = GridLayoutManager(requireContext(), 2)
-                    val audioAdapter = FormatAdapter(audioList) { chosen ->
-                        selectedFormatId = chosen.id
-                        videoAdapterRef?.clearSelection()
-                    }
-                    audioAdapterRef = audioAdapter
-                    binding.rvAudioFormats.adapter = audioAdapter
-                }
-                if (videoList.isEmpty() && audioList.isEmpty()) {
+                if (formatsResult.video.isEmpty()) {
                     Toast.makeText(requireContext(), "No formats found", Toast.LENGTH_SHORT).show()
+                    return@onSuccess
+                }
+                val adapter = FormatListAdapter(rows) { entry ->
+                    selectedFormatId = entry.info.id
+                    selectedHeight = entry.height
+                    selectedContainer = entry.container
+                }
+                val glm = GridLayoutManager(requireContext(), 2)
+                glm.spanSizeLookup = FormatListAdapter.spanSizeLookup(adapter)
+                binding.rvFormats.layoutManager = glm
+                binding.rvFormats.adapter = adapter
+                // Default selection: first video format (VidMate-style).
+                if (firstVideoEntryIndex >= 0) {
+                    adapter.preselect(firstVideoEntryIndex)
+                    val first = rows[firstVideoEntryIndex] as FormatRow.Entry
+                    selectedFormatId = first.info.id
+                    selectedHeight = first.height
+                    selectedContainer = first.container
                 }
             }.onFailure {
                 Toast.makeText(requireContext(), "Failed: ${it.message}", Toast.LENGTH_SHORT).show()
@@ -136,6 +134,9 @@ class DownloadDialogFragment : BottomSheetDialogFragment() {
             // Download with the same player_client that produced the format
             // list (e.g. tv / web_safari when the default capped at 360p).
             formatsClient?.let { putExtra("CLIENT", it) }
+            // For the service's retry matrix (403/SABR fallback across clients).
+            putExtra("HEIGHT", selectedHeight)
+            putExtra("CONTAINER", selectedContainer)
         }
         ContextCompat.startForegroundService(requireContext(), intent)
         dismiss()

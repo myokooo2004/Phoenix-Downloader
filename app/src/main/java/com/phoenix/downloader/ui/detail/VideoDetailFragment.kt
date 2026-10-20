@@ -138,6 +138,12 @@ class VideoDetailFragment : Fragment() {
             val list = if (result.isSuccess) {
                 result.getOrNull() ?: emptyList()
             } else emptyList()
+            context?.let { ctx ->
+                com.phoenix.downloader.core.CrashLogger.logNonFatal(
+                    ctx, "loadRelated.count",
+                    Exception("related count=${list.size} videoId=$videoId")
+                )
+            }
             if (list.isNotEmpty()) {
                 binding.rvRelated.adapter = VideoAdapter(
                     list,

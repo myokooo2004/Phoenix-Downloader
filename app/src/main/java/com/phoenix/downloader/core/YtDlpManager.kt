@@ -199,18 +199,24 @@ object YtDlpManager {
     /**
      * Step 2: list downloadable formats, split into music and video.
      *
-     * Client retry chain: the default client set (android_vr-led) is known to
-     * return a 360p-capped list because android_vr withholds HTTPS formats
-     * that need a GVS PO token. If the default attempt tops out below 720p,
-     * retry with token-free clients (tv, then web_safari) and keep whichever
-     * attempt produced the richest list, so 4K shows when the video has it.
+     * Client chain: tv first (token-free, downloadable formats), then the
+     * default set (richest lists — up to 4K — but its URLs can be SABR-gated;
+     * DownloadService's retry matrix covers that), then web_safari when the
+     * best so far is below 1080p. Keeps whichever attempt is richest, so 4K
+     * shows whenever the video has it.
      */
     suspend fun fetchFormats(url: String): Result<FormatsResult> = withContext(Dispatchers.IO) {
         try {
             if (!isReady()) return@withContext Result.failure(Exception(notReadyReason()))
-            val clients = listOf<String?>(null, "tv", "web_safari")
+            // Order matters: try "tv" first — its formats are token-free and
+            // actually DOWNLOAD (the default/web client's listed URLs are
+            // SABR/PO-token gated and die with HTTP 403 in DownloadService,
+            // field-proven build 246). Fall back to the default set (richest
+            // lists, up to 4K), then web_safari if still below 1080p.
+            val clients = listOf<String?>("tv", null, "web_safari")
             var best: FormatsResult? = null
-            for (client in clients) {
+            for ((index, client) in clients.withIndex()) {
+                if (index == 2 && (best?.maxHeight ?: 0) >= 1080) break
                 val attempt = try {
                     fetchFormatsOnce(url, client)
                 } catch (e: Exception) {
@@ -224,7 +230,7 @@ object YtDlpManager {
                 ) {
                     best = attempt
                 }
-                if (attempt.maxHeight >= 720) break
+                if ((best?.maxHeight ?: 0) >= 2160) break
             }
             val winner = best ?: return@withContext Result.failure(Exception("No formats found"))
             Result.success(winner)

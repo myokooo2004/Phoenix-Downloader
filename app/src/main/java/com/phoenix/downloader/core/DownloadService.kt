@@ -20,6 +20,8 @@ class DownloadService : Service() {
         val formatId = intent.getStringExtra("FORMAT_ID") ?: "best"
         val title = intent.getStringExtra("TITLE") ?: "Downloading..."
         val client = intent.getStringExtra("CLIENT")
+        val height = intent.getIntExtra("HEIGHT", 0)
+        val container = intent.getStringExtra("CONTAINER") ?: "MP4"
 
         startForeground(1, buildNotification("Preparing...", 0))
 
@@ -33,52 +35,71 @@ class DownloadService : Service() {
                 val safeTitle = title.replace(Regex("[\\\\/:*?\"<>|]"), "_").take(100)
                 val outputTemplate = "$outputDir/$safeTitle.%(ext)s"
 
-                val request = YoutubeDLRequest(url)
-                // Use the same player_client that produced the format list in
-                // the dialog (format ids/clients are linked; the default
-                // android_vr set caps at 360p without a PO token).
-                if (!client.isNullOrEmpty()) {
-                    request.addOption("--extractor-args", "youtube:player_client=$client")
-                }
-                // Cookies (WebView-synced) — same as YtDlpManager.baseRequest.
-                // Without them the actual download hit bot-checks that the
-                // format fetch (which HAS cookies) passed.
-                CookieHelper.getCookieFilePath(this@DownloadService)?.let { cookiePath ->
-                    request.addOption("--cookies", cookiePath)
-                }
-                if (formatId.startsWith("MP3_")) {
-                    // MP3 extraction via ffmpeg
-                    val kbps = formatId.removePrefix("MP3_")
-                    request.addOption("-f", "bestaudio/best")
-                    request.addOption("--extract-audio")
-                    request.addOption("--audio-format", "mp3")
-                    request.addOption("--audio-quality", kbps)
-                } else {
-                    // Video: check for MKV container request (formatId|MKV)
-                    val isMkv = formatId.endsWith("|MKV")
-                    val baseFormatId = formatId.removeSuffix("|MKV")
-                    // For video formats, merge with best audio using ffmpeg
-                    // Format: "<videoId>+bestaudio/best" ensures audio is included
-                    val formatSelector = if (baseFormatId != "best" && !baseFormatId.contains("+")) {
-                        "$baseFormatId+bestaudio/best"
-                    } else {
-                        baseFormatId
+                // ---- Retry matrix -------------------------------------------------
+                // Field-proven failure (build 246 log): the default/web client's
+                // format URLs are SABR/PO-token gated -> the download dies with
+                // "HTTP Error 403" even though listing worked. So: attempt 1 =
+                // the exact format the user picked; later attempts re-resolve
+                // the same height through token-free clients (tv, web_safari,
+                // default). First success wins; every attempt is logged.
+                val attempts = buildAttempts(formatId, client, height, container)
+                var lastError: Exception? = null
+                var succeeded = false
+                for ((index, attempt) in attempts.withIndex()) {
+                    try {
+                        CrashLogger.logNonFatal(
+                            this@DownloadService, "DownloadService",
+                            Exception(
+                                "attempt ${index + 1}/${attempts.size} client=${attempt.client ?: "default"} " +
+                                    "selector=${attempt.selector} mp3=${attempt.mp3Kbps}"
+                            )
+                        )
+                        val request = YoutubeDLRequest(url)
+                        if (!attempt.client.isNullOrEmpty()) {
+                            request.addOption("--extractor-args", "youtube:player_client=${attempt.client}")
+                        }
+                        // Cookies (WebView-synced) — same as YtDlpManager.baseRequest.
+                        CookieHelper.getCookieFilePath(this@DownloadService)?.let { cookiePath ->
+                            request.addOption("--cookies", cookiePath)
+                        }
+                        request.addOption("-f", attempt.selector)
+                        if (attempt.mp3Kbps != null) {
+                            request.addOption("--extract-audio")
+                            request.addOption("--audio-format", "mp3")
+                            request.addOption("--audio-quality", attempt.mp3Kbps)
+                        } else {
+                            request.addOption(
+                                "--merge-output-format",
+                                if (container == "MKV") "mkv" else "mp4"
+                            )
+                        }
+                        // aria2c multi-connection (4 connections to avoid blocks)
+                        request.addOption("--external-downloader", "aria2c")
+                        request.addOption("--external-downloader-args", "aria2c:-x 4 -s 4 -k 1M")
+                        request.addOption("-o", outputTemplate)
+                        request.addOption("--no-check-certificate")
+                        request.addOption("--socket-timeout", "30")
+
+                        updateNotification("$title: 0%", 0)
+                        YoutubeDL.getInstance().execute(request) { progress, _, _ ->
+                            val pct = progress.toInt().coerceIn(0, 100)
+                            updateNotification("$title: $pct%", pct)
+                        }
+                        succeeded = true
+                        break
+                    } catch (e: Exception) {
+                        lastError = e
+                        CrashLogger.logNonFatal(
+                            this@DownloadService, "DownloadService",
+                            Exception(
+                                "attempt ${index + 1} failed client=${attempt.client ?: "default"}: " +
+                                    (e.message ?: "").take(500)
+                            )
+                        )
                     }
-                    request.addOption("-f", formatSelector)
-                    request.addOption("--merge-output-format", if (isMkv) "mkv" else "mp4")
                 }
-                // Use aria2c for multi-connection faster downloads (4 connections to avoid blocks)
-                request.addOption("--external-downloader", "aria2c")
-                request.addOption("--external-downloader-args", "aria2c:-x 4 -s 4 -k 1M")
-                request.addOption("-o", outputTemplate)
-                request.addOption("--no-check-certificate")
-                request.addOption("--socket-timeout", "30")
-
-                updateNotification("$title: 0%", 0)
-
-                YoutubeDL.getInstance().execute(request) { progress, _, _ ->
-                    val pct = progress.toInt().coerceIn(0, 100)
-                    updateNotification("$title: $pct%", pct)
+                if (!succeeded) {
+                    throw lastError ?: Exception("All download attempts failed")
                 }
 
                 // Locate the produced file (skip yt-dlp temp/part files)
@@ -114,6 +135,53 @@ class DownloadService : Service() {
         }
 
         return START_NOT_STICKY
+    }
+
+    private data class Attempt(
+        val client: String?,
+        val selector: String,
+        val mp3Kbps: String?
+    )
+
+    /**
+     * Attempt 1 is always exactly what the user picked (same client + format).
+     * Fallbacks re-resolve the same target through other clients, because the
+     * default/web client's URLs are SABR/PO-token gated (HTTP 403 on download).
+     */
+    private fun buildAttempts(
+        formatId: String,
+        dialogClient: String?,
+        height: Int,
+        container: String
+    ): List<Attempt> {
+        val attempts = mutableListOf<Attempt>()
+        fun add(client: String?, selector: String, mp3Kbps: String?) {
+            val a = Attempt(client, selector, mp3Kbps)
+            if (!attempts.contains(a)) attempts.add(a)
+        }
+        if (formatId.startsWith("MP3_")) {
+            val kbps = formatId.removePrefix("MP3_")
+            add(dialogClient, "bestaudio/best", kbps)
+            add("tv", "bestaudio/best", kbps)
+            add(null, "bestaudio/best", kbps)
+        } else {
+            val baseFormatId = formatId.removeSuffix("|MKV")
+            val exactSelector = if (baseFormatId != "best" && !baseFormatId.contains("+")) {
+                "$baseFormatId+bestaudio/best"
+            } else {
+                baseFormatId
+            }
+            add(dialogClient, exactSelector, null)
+            val heightSelector = if (height > 0) {
+                "bestvideo[height<=$height]+bestaudio/best[height<=$height]"
+            } else {
+                "bestvideo+bestaudio/best"
+            }
+            add("tv", heightSelector, null)
+            add("web_safari", heightSelector, null)
+            add(null, heightSelector, null)
+        }
+        return attempts
     }
 
     /**
