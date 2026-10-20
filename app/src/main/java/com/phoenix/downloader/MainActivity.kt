@@ -132,6 +132,14 @@ class MainActivity : AppCompatActivity() {
             .commit()
     }
 
+    /** The search entry screen (history + hot searches + live suggestions). */
+    fun openSearchEntry() {
+        supportFragmentManager.beginTransaction()
+            .replace(R.id.nav_host, com.phoenix.downloader.ui.search.SearchEntryFragment())
+            .addToBackStack(null)
+            .commit()
+    }
+
     /** Play a file already on the device (from My Files). */
     fun openLocalPlayer(path: String, title: String) {
         supportFragmentManager.beginTransaction()

@@ -5,9 +5,11 @@ import com.phoenix.downloader.ui.home.VideoItem
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.URLEncoder
 
 /**
  * YouTube Data API v3 client for trending videos.
@@ -331,6 +333,28 @@ object YouTubeApiClient {
     }
 
     /** Extract video ID from YouTube URL. */
+    /**
+     * Live search suggestions while typing (YouTube's public suggest
+     * endpoint — no API key, no quota). Returns an empty list on any
+     * failure; the search screen just keeps showing the sections then.
+     */
+    suspend fun fetchSuggestions(query: String): List<String> = withContext(Dispatchers.IO) {
+        try {
+            val enc = URLEncoder.encode(query, "UTF-8")
+            val conn = URL("https://suggestqueries.google.com/complete/search?client=firefox&ds=yt&q=$enc")
+                .openConnection() as HttpURLConnection
+            conn.connectTimeout = 6000
+            conn.readTimeout = 6000
+            conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14)")
+            if (conn.responseCode != 200) return@withContext emptyList()
+            val arr = JSONArray(conn.inputStream.bufferedReader().readText())
+            val list = arr.optJSONArray(1) ?: return@withContext emptyList()
+            (0 until list.length()).map { list.optString(it) }.filter { it.isNotBlank() }
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
     fun extractVideoId(url: String): String? {
         return try {
             when {

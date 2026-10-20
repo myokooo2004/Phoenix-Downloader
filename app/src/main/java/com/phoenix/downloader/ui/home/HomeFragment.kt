@@ -4,7 +4,6 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.view.inputmethod.EditorInfo
 import android.widget.Toast
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
@@ -34,31 +33,58 @@ class HomeFragment : Fragment() {
         binding.rvVideos.layoutManager = LinearLayoutManager(requireContext())
         binding.rvVideos.setHasFixedSize(true)
 
-        // Hide search bar on scroll down, show on scroll up (Vidmate-style).
-        // Hysteresis: toggling visibility forces a full layout pass, so only
-        // flip after ~60dp of accumulated scroll in ONE direction (and only
-        // when the state actually changes) - per-event flips made scrolling
-        // visibly jerky.
+        // Hide the search bar on scroll down, show on scroll up. The bar is
+        // an OVERLAY (see fragment_home.xml): hiding slides it up with zero
+        // effect on the list's layout. Frame analysis of a user recording
+        // (2026-10-20) proved the old in-flow GONE/VISIBLE toggles were the
+        // scroll jank: 14 toggles in 11s, each shifting content ~66dp and
+        // stalling frames. Rules now: flip only after ~90dp accumulated in
+        // one direction, at most once per 600ms, always show at the top.
         var searchBarVisible = true
         var scrollAccum = 0
+        var lastBarToggleAt = 0L
+
+        fun applySearchBar(show: Boolean) {
+            if (show == searchBarVisible) return
+            searchBarVisible = show
+            lastBarToggleAt = android.os.SystemClock.uptimeMillis()
+            val bar = binding.searchBarContainer
+            if (show) {
+                bar.visibility = View.VISIBLE
+                bar.animate().translationY(0f).setDuration(180).start()
+            } else {
+                val lp = bar.layoutParams as android.widget.FrameLayout.LayoutParams
+                val dist = (bar.height + lp.topMargin).toFloat()
+                bar.animate().translationY(-dist).setDuration(180)
+                    .withEndAction { if (!searchBarVisible) bar.visibility = View.INVISIBLE }
+                    .start()
+            }
+        }
         // + Infinite scroll: load more when reaching bottom
         binding.rvVideos.addOnScrollListener(object : androidx.recyclerview.widget.RecyclerView.OnScrollListener() {
             override fun onScrolled(recyclerView: androidx.recyclerview.widget.RecyclerView, dx: Int, dy: Int) {
                 super.onScrolled(recyclerView, dx, dy)
-                if (dy > 0) {
-                    if (scrollAccum < 0) scrollAccum = 0
-                    scrollAccum += dy
-                    if (searchBarVisible && scrollAccum > 60) {
-                        searchBarVisible = false
-                        binding.searchBarContainer.visibility = View.GONE
-                        scrollAccum = 0
+                if (!recyclerView.canScrollVertically(-1)) {
+                    // At the very top the bar is always shown.
+                    scrollAccum = 0
+                    applySearchBar(true)
+                } else {
+                    if (dy > 0) {
+                        if (scrollAccum < 0) scrollAccum = 0
+                        scrollAccum += dy
+                    } else if (dy < 0) {
+                        if (scrollAccum > 0) scrollAccum = 0
+                        scrollAccum += dy
                     }
-                } else if (dy < 0) {
-                    if (scrollAccum > 0) scrollAccum = 0
-                    scrollAccum += dy
-                    if (!searchBarVisible && scrollAccum < -60) {
-                        searchBarVisible = true
-                        binding.searchBarContainer.visibility = View.VISIBLE
+                    val desired = when {
+                        scrollAccum > 90 -> false
+                        scrollAccum < -90 -> true
+                        else -> searchBarVisible
+                    }
+                    if (desired != searchBarVisible &&
+                        android.os.SystemClock.uptimeMillis() - lastBarToggleAt >= 600
+                    ) {
+                        applySearchBar(desired)
                         scrollAccum = 0
                     }
                 }
@@ -87,26 +113,11 @@ class HomeFragment : Fragment() {
 
         loadTrendingData()
         
-        binding.etSearch.setOnEditorActionListener { _, actionId, _ ->
-            if (actionId == EditorInfo.IME_ACTION_SEARCH || actionId == EditorInfo.IME_ACTION_DONE) {
-                val text = binding.etSearch.text.toString().trim()
-                if (text.isNotEmpty()) {
-                    val looksLikeUrl = text.startsWith("http://") || text.startsWith("https://") ||
-                        text.contains("youtube.com") || text.contains("youtu.be") ||
-                        text.contains("facebook.com") || text.contains("fb.watch") ||
-                        text.contains("tiktok.com")
-                    if (looksLikeUrl) {
-                        // Pasted link -> download dialog (existing URL flow)
-                        val url = if (text.startsWith("http")) text else "https://$text"
-                        DownloadDialogFragment.newInstance(url, "Download").show(childFragmentManager, "DownloadDialog")
-                    } else {
-                        // Plain text -> search results screen
-                        (activity as? MainActivity)?.openSearch(text)
-                    }
-                    binding.etSearch.setText("")
-                }
-                true
-            } else false
+        // The Home bar is a doorway, not a text field: tapping it opens
+        // the dedicated search screen (history + hot searches + live
+        // suggestions).
+        binding.etSearch.setOnClickListener {
+            (activity as? MainActivity)?.openSearchEntry()
         }
 
         // Downloads button
@@ -161,12 +172,19 @@ class HomeFragment : Fragment() {
             if (result.isSuccess) {
                 val (videos, token) = result.getOrNull() ?: Pair(emptyList(), null)
                 if (videos.isNotEmpty()) {
+                    context?.let { com.phoenix.downloader.core.TrendingCache.save(it, videos) }
+                    if (binding.rvVideos.computeVerticalScrollOffset() > 0) {
+                        // The user is already scrolling through the cached
+                        // list: swapping content under their finger would
+                        // yank the scroll position. The fresh list is saved
+                        // to disk and appears on the next app open instead.
+                        return@launch
+                    }
                     nextPageToken = token
                     videoList.clear()
                     videoList.addAll(videos)
                     if (videoAdapter == null) ensureAdapter()
                     else videoAdapter?.notifyDataSetChanged()
-                    context?.let { com.phoenix.downloader.core.TrendingCache.save(it, videoList) }
                     return@launch
                 }
             }
