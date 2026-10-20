@@ -156,51 +156,84 @@ class BrowserFragment : Fragment() {
         binding.tvDetectHint.isVisible = pendingVideoUrl != null
     }
 
-    /** Inject Vidmate-style download buttons next to videos in list pages */
+    /** Inject download buttons ON VIDEO THUMBNAILS ONLY (user rule). */
     private fun injectDownloadButtons(webView: WebView) {
         // NOTE: m.youtube.com renders video lists via JS after onPageFinished.
         // This script retries on a timer + MutationObserver, and returns JSON
         // diagnostics so the crash log shows exactly what the DOM contained.
+        //
+        // Placement rule (user, 2026-10-20): the button must sit ON the
+        // video thumbnail itself — never on renderer containers, headers or
+        // the player. So a button is only added when the anchor (or its
+        // renderer's thumbnail anchor) actually wraps a thumbnail <img>,
+        // and it is positioned inside THAT anchor. Anchors inside the
+        // player area are skipped. YouTube recycles list elements while
+        // scrolling, so the button stores its video id in data-vid and the
+        // scan refreshes it — a recycled row never downloads the wrong video.
         val js = """
             (function() {
                 try {
-                    var debug = {anchors: 0, matched: 0, added: 0, err: null};
+                    var debug = {anchors: 0, matched: 0, added: 0, noThumb: 0, inPlayer: 0, err: null};
+                    function videoIdOf(a) {
+                        var href = a.getAttribute('href') || '';
+                        var m = href.match(/[?&]v=([\w-]{11})/);
+                        return m ? m[1] : null;
+                    }
+                    function thumbnailHost(link, vid) {
+                        // The anchor itself wraps the thumbnail image
+                        if (link.querySelector('img')) return link;
+                        // Otherwise find the thumbnail anchor of the same
+                        // video inside the list-item renderer
+                        var container = link.closest('ytm-video-with-context-renderer,ytm-media-item,ytm-compact-video-renderer,ytm-playlist-video-renderer,ytm-playlist-panel-video-renderer,ytd-rich-item-renderer,ytd-video-renderer,ytd-compact-video-renderer,ytd-grid-video-renderer,ytd-playlist-panel-video-renderer,ytd-playlist-video-renderer');
+                        if (!container) return null;
+                        var anchors = container.querySelectorAll('a[href*="watch"]');
+                        for (var j = 0; j < anchors.length; j++) {
+                            if (videoIdOf(anchors[j]) === vid && anchors[j].querySelector('img')) {
+                                return anchors[j];
+                            }
+                        }
+                        return null;
+                    }
                     function addButtons() {
                         try {
                             var links = document.querySelectorAll('a[href*="watch"]');
                             debug.anchors = links.length;
                             for (var i = 0; i < links.length; i++) {
                                 var link = links[i];
-                                var href = link.getAttribute('href') || '';
-                                if (href.indexOf('/watch') === -1) continue;
-                                var m = href.match(/[?&]v=([\w-]{11})/);
-                                if (!m) continue;
+                                var vid = videoIdOf(link);
+                                if (!vid) continue;
                                 debug.matched++;
-                                var vid = m[1];
-                                var container = link.closest('ytm-video-with-context-renderer,ytm-media-item,ytm-compact-video-renderer,ytm-playlist-video-renderer,ytm-playlist-panel-video-renderer,ytd-rich-item-renderer,ytd-video-renderer,ytd-compact-video-renderer,ytd-grid-video-renderer,ytd-playlist-panel-video-renderer,ytd-playlist-video-renderer');
-                                if (!container) container = link.parentElement;
-                                if (!container) continue;
-                                if (container.querySelector('[data-phoenix-btn]')) continue;
+                                var host = thumbnailHost(link, vid);
+                                if (!host) { debug.noThumb++; continue; }
+                                if (host.closest('ytm-player,#player,.html5-video-player,ytm-inline-player')) {
+                                    debug.inPlayer++; continue;
+                                }
+                                var existing = host.querySelector('[data-phoenix-btn]');
+                                if (existing) {
+                                    // Recycled row: refresh the target video
+                                    existing.setAttribute('data-vid', vid);
+                                    continue;
+                                }
                                 try {
-                                    if (window.getComputedStyle(container).position === 'static') {
-                                        container.style.position = 'relative';
+                                    if (window.getComputedStyle(host).position === 'static') {
+                                        host.style.position = 'relative';
                                     }
                                 } catch (e2) {}
                                 var btn = document.createElement('div');
                                 btn.setAttribute('data-phoenix-btn', '1');
+                                btn.setAttribute('data-vid', vid);
                                 btn.textContent = '⬇';
-                                btn.style.cssText = 'position:absolute;top:8px;right:8px;width:36px;height:36px;' +
+                                btn.style.cssText = 'position:absolute;top:6px;right:6px;width:36px;height:36px;' +
                                     'background:#e53935;color:white;border-radius:50%;display:flex;' +
-                                    'align-items:center;justify-content:center;font-size:20px;z-index:2147483647;' +
+                                    'align-items:center;justify-content:center;font-size:20px;z-index:9999;' +
                                     'cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,0.4);';
-                                (function(url) {
-                                    btn.addEventListener('click', function(e) {
-                                        e.stopPropagation();
-                                        e.preventDefault();
-                                        PhoenixDownloader.onDownloadClick(url);
-                                    }, true);
-                                })('https://www.youtube.com/watch?v=' + vid);
-                                container.appendChild(btn);
+                                btn.addEventListener('click', function(e) {
+                                    e.stopPropagation();
+                                    e.preventDefault();
+                                    var v = btn.getAttribute('data-vid');
+                                    if (v) PhoenixDownloader.onDownloadClick('https://www.youtube.com/watch?v=' + v);
+                                }, true);
+                                host.appendChild(btn);
                                 debug.added++;
                             }
                         } catch (e) { debug.err = String(e && e.message || e); }
