@@ -186,27 +186,10 @@ object YtDlpManager {
                 if (isAudioOnly) music.add(opt) else video.add(opt)
             }
 
-            // Deduplicate: keep one format per quality label.
-            // Prefer MP4 over WEBM, then larger size (higher bitrate).
-            val dedupedMusic = music.groupBy { it.label }
-                .map { (_, group) ->
-                    group.maxWithOrNull(
-                        compareBy<FormatOption> { it.format == "MP4" }
-                            .thenBy { it.sizeLabel }
-                    ) ?: group[0]
-                }
-            val dedupedVideo = video.groupBy { it.label }
-                .map { (_, group) ->
-                    group.maxWithOrNull(
-                        compareBy<FormatOption> { it.format == "MP4" }
-                            .thenBy { it.sizeLabel }
-                    ) ?: group[0]
-                }
-
-            val sortedVideo = dedupedVideo.sortedBy {
+            val sortedVideo = video.sortedBy {
                 it.label.filter { c -> c.isDigit() }.toIntOrNull() ?: 0
             }
-            Result.success(FormatsResult(music = dedupedMusic, video = sortedVideo))
+            Result.success(FormatsResult(music = music, video = sortedVideo))
         } catch (e: Exception) {
             logFailure("fetchFormats", e)
             Result.failure(e)

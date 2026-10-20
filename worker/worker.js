@@ -69,15 +69,15 @@ async function handleRequest(request) {
       // Use search for Myanmar music videos instead (real, live data).
       api = `${YT_BASE}/search?part=snippet&q=${encodeURIComponent("Myanmar music")}&type=video&maxResults=${maxResults}&key=${key}`;
       if (pageToken) api += `&pageToken=${encodeURIComponent(pageToken)}`;
-      // Search results change; cache 30 minutes
-      return ytFetch(api, 1800);
+      // Cache 1 hour to save quota (search is expensive)
+      return ytFetch(api, 3600);
     } else {
       // For other regions, use the trending chart
       api = `${YT_BASE}/videos?part=snippet,contentDetails,statistics&chart=mostPopular&maxResults=${maxResults}&key=${key}`;
       api += `&regionCode=${encodeURIComponent(region)}`;
       if (pageToken) api += `&pageToken=${encodeURIComponent(pageToken)}`;
-      // Trending changes slowly; cache 15 minutes
-      return ytFetch(api, 900);
+      // Trending changes slowly; cache 1 hour
+      return ytFetch(api, 3600);
     }
   }
 
@@ -89,8 +89,8 @@ async function handleRequest(request) {
     // Note: YouTube deprecated relatedToVideoId; use text search on title instead
     const query = q || videoId;
     const api = `${YT_BASE}/search?part=snippet&q=${encodeURIComponent(query)}&type=video&maxResults=${maxResults}&key=${key}`;
-    // Related is per-video; cache 1 hour
-    return ytFetch(api, 3600);
+    // Related is per-video; cache 2 hours to save quota
+    return ytFetch(api, 7200);
   }
 
   if (path === "/comments") {
@@ -98,8 +98,8 @@ async function handleRequest(request) {
     if (!videoId) return jsonError(400, "videoId required");
     const maxResults = Math.min(parseInt(url.searchParams.get("maxResults") || "20", 10), 100);
     const api = `${YT_BASE}/commentThreads?part=snippet&videoId=${encodeURIComponent(videoId)}&order=relevance&maxResults=${maxResults}&textFormat=plainText&key=${key}`;
-    // Comments change; cache 10 minutes
-    return ytFetch(api, 600);
+    // Comments change; cache 30 minutes
+    return ytFetch(api, 1800);
   }
 
   if (path === "/" || path === "/health") {
