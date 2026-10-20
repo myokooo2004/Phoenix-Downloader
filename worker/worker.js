@@ -86,9 +86,11 @@ async function handleRequest(request) {
     const q = url.searchParams.get("q");
     if (!videoId && !q) return jsonError(400, "videoId or q required");
     const maxResults = Math.min(parseInt(url.searchParams.get("maxResults") || "20", 10), 50);
+    const pageToken = url.searchParams.get("pageToken");
     // Note: YouTube deprecated relatedToVideoId; use text search on title instead
     const query = q || videoId;
-    const api = `${YT_BASE}/search?part=snippet&q=${encodeURIComponent(query)}&type=video&maxResults=${maxResults}&key=${key}`;
+    let api = `${YT_BASE}/search?part=snippet&q=${encodeURIComponent(query)}&type=video&maxResults=${maxResults}&key=${key}`;
+    if (pageToken) api += `&pageToken=${encodeURIComponent(pageToken)}`;
     // Related is per-video; cache 2 hours to save quota
     return ytFetch(api, 7200);
   }

@@ -35,6 +35,12 @@ class VideoDetailFragment : Fragment() {
     private var videoDuration = 0
     private var player: ExoPlayer? = null
 
+    // Related-videos pagination (infinite scroll)
+    private val relatedItems = mutableListOf<VideoItem>()
+    private var relatedAdapter: VideoAdapter? = null
+    private var relatedNextToken: String? = null
+    private var relatedLoading = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         videoUrl = arguments?.getString(ARG_URL) ?: ""
@@ -99,6 +105,19 @@ class VideoDetailFragment : Fragment() {
         binding.rvRelated.layoutManager = LinearLayoutManager(requireContext())
         loadRelated()
         loadComments()
+
+        // Infinite scroll for related: when the page is scrolled near the
+        // bottom, fetch the next page and append it.
+        binding.root.setOnScrollChangeListener(
+            androidx.core.widget.NestedScrollView.OnScrollChangeListener { v, _, scrollY, _, _ ->
+                val child = v.getChildAt(0) ?: return@OnScrollChangeListener
+                if (scrollY + v.height >= child.height - 900 &&
+                    relatedNextToken != null && !relatedLoading
+                ) {
+                    loadRelated()
+                }
+            }
+        )
     }
 
     private fun setupPlayer() {
@@ -123,10 +142,16 @@ class VideoDetailFragment : Fragment() {
         }
     }
 
+    /** Loads the FIRST related page, or the NEXT page when scrolled near the bottom. */
     private fun loadRelated() {
         val videoId = YouTubeApiClient.extractVideoId(videoUrl) ?: return
+        if (relatedLoading) return
+        relatedLoading = true
+        val token = relatedNextToken
+        val firstPage = relatedAdapter == null
         viewLifecycleOwner.lifecycleScope.launch {
-            val result = YouTubeApiClient.getRelatedVideos(videoId, 20, videoTitle)
+            val result = YouTubeApiClient.getRelatedVideos(videoId, 20, videoTitle, token)
+            relatedLoading = false
             if (result.isFailure) {
                 context?.let { ctx ->
                     com.phoenix.downloader.core.CrashLogger.logNonFatal(
@@ -134,33 +159,44 @@ class VideoDetailFragment : Fragment() {
                         result.exceptionOrNull() ?: Exception("unknown related failure videoId=$videoId")
                     )
                 }
+                return@launch
             }
-            val list = if (result.isSuccess) {
-                result.getOrNull() ?: emptyList()
-            } else emptyList()
+            val page = result.getOrNull() ?: return@launch
+            relatedNextToken = page.nextPageToken
+            // Append, skipping duplicates (search pages can overlap).
+            val seen = relatedItems.map { it.url }.toHashSet()
+            val fresh = page.videos.filter { it.url !in seen }
+            val insertAt = relatedItems.size
+            relatedItems.addAll(fresh)
             context?.let { ctx ->
                 com.phoenix.downloader.core.CrashLogger.logNonFatal(
                     ctx, "loadRelated.count",
-                    Exception("related count=${list.size} videoId=$videoId")
+                    Exception("related total=${relatedItems.size} (+${fresh.size}) next=${relatedNextToken != null} videoId=$videoId")
                 )
             }
-            if (list.isNotEmpty()) {
-                binding.rvRelated.adapter = VideoAdapter(
-                    list,
-                    onWatchClick = { video ->
-                        parentFragmentManager.beginTransaction()
-                            .replace(
-                                (requireView().parent as View).id,
-                                newInstance(video.url, video.title, video.thumbnail, video.duration)
-                            )
-                            .addToBackStack(null)
-                            .commit()
-                    },
-                    onDownloadClick = { video ->
-                        DownloadDialogFragment.newInstance(video.url, video.title)
-                            .show(childFragmentManager, "DownloadDialog")
-                    }
-                )
+            if (firstPage) {
+                if (relatedItems.isNotEmpty()) {
+                    val adapter = VideoAdapter(
+                        relatedItems,
+                        onWatchClick = { video ->
+                            parentFragmentManager.beginTransaction()
+                                .replace(
+                                    (requireView().parent as View).id,
+                                    newInstance(video.url, video.title, video.thumbnail, video.duration)
+                                )
+                                .addToBackStack(null)
+                                .commit()
+                        },
+                        onDownloadClick = { video ->
+                            DownloadDialogFragment.newInstance(video.url, video.title)
+                                .show(childFragmentManager, "DownloadDialog")
+                        }
+                    )
+                    relatedAdapter = adapter
+                    binding.rvRelated.adapter = adapter
+                }
+            } else if (fresh.isNotEmpty()) {
+                relatedAdapter?.notifyItemRangeInserted(insertAt, fresh.size)
             }
         }
     }

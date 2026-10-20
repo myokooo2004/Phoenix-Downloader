@@ -121,17 +121,29 @@ object YouTubeApiClient {
         }
     }
 
+    /** One page of related videos plus the token for the next page (null = end). */
+    data class RelatedPage(val videos: List<VideoItem>, val nextPageToken: String?)
+
     /**
-     * Fetch related videos for a video ID.
-     * Uses search.list with relatedToVideoId (100 quota units per call).
+     * Fetch one page of related videos (Worker /related -> search.list by
+     * title; relatedToVideoId is deprecated). Pass [pageToken] from the
+     * previous page for infinite scrolling.
      */
-    suspend fun getRelatedVideos(videoId: String, maxResults: Int = 20, query: String? = null): Result<List<VideoItem>> = withContext(Dispatchers.IO) {
+    suspend fun getRelatedVideos(
+        videoId: String,
+        maxResults: Int = 20,
+        query: String? = null,
+        pageToken: String? = null
+    ): Result<RelatedPage> = withContext(Dispatchers.IO) {
         try {
             var urlStr = "$WORKER_BASE/related" +
                     "?videoId=$videoId" +
                     "&maxResults=${maxResults.coerceIn(1, 50)}"
             if (query != null) {
                 urlStr += "&q=${java.net.URLEncoder.encode(query, "UTF-8")}"
+            }
+            if (!pageToken.isNullOrEmpty()) {
+                urlStr += "&pageToken=${java.net.URLEncoder.encode(pageToken, "UTF-8")}"
             }
             val url = URL(urlStr)
             val conn = url.openConnection() as HttpURLConnection
@@ -148,6 +160,7 @@ object YouTubeApiClient {
 
             val body = conn.inputStream.bufferedReader().readText()
             val json = JSONObject(body)
+            val nextToken = json.optString("nextPageToken", "").ifEmpty { null }
             val items = json.getJSONArray("items")
             val videos = mutableListOf<VideoItem>()
             for (i in 0 until items.length()) {
@@ -180,7 +193,7 @@ object YouTubeApiClient {
                     continue
                 }
             }
-            Result.success(videos)
+            Result.success(RelatedPage(videos, nextToken))
         } catch (e: Exception) {
             Log.e(TAG, "getRelatedVideos failed", e)
             Result.failure(e)
