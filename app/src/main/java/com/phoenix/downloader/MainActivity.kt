@@ -37,6 +37,10 @@ class MainActivity : AppCompatActivity() {
         requestPermissions()
         if (savedInstanceState == null) showHome()
 
+        // Background: refresh YouTube cookies for yt-dlp bot bypass.
+        // Loads youtube.com in a hidden WebView, saves cookies, then cleans up.
+        refreshYouTubeCookies()
+
         binding.bottomNav.setOnItemSelectedListener { item ->
             if (suppressNavListener) return@setOnItemSelectedListener false
             when (item.itemId) {
@@ -95,6 +99,60 @@ class MainActivity : AppCompatActivity() {
         }
         if (perms.isNotEmpty()) {
             registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {}.launch(perms.toTypedArray())
+        }
+    }
+
+    /**
+     * Background YouTube cookie refresh for yt-dlp bot bypass.
+     * Loads youtube.com in a hidden WebView, saves cookies via CookieHelper,
+     * then destroys the WebView. Runs once per app start, silent on failure.
+     */
+    private fun refreshYouTubeCookies() {
+        try {
+            val webView = android.webkit.WebView(this)
+            webView.settings.javaScriptEnabled = true
+            webView.settings.domStorageEnabled = true
+            // Use a modern user agent to avoid bot detection
+            webView.settings.userAgentString = "Mozilla/5.0 (Linux; Android 14; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
+            webView.webViewClient = object : android.webkit.WebViewClient() {
+                override fun onPageFinished(view: android.webkit.WebView?, url: String?) {
+                    try {
+                        com.phoenix.downloader.core.CookieHelper.saveCookiesForUrl(
+                            this@MainActivity,
+                            "https://www.youtube.com"
+                        )
+                        android.util.Log.d("MainActivity", "Background YouTube cookies refreshed")
+                    } catch (e: Exception) {
+                        android.util.Log.w("MainActivity", "Cookie refresh failed", e)
+                    } finally {
+                        // Clean up after a short delay to ensure cookies are written
+                        view?.postDelayed({
+                            try {
+                                view.destroy()
+                            } catch (e: Exception) {
+                                // Ignore
+                            }
+                        }, 2000)
+                    }
+                }
+
+                override fun onReceivedError(
+                    view: android.webkit.WebView?,
+                    request: android.webkit.WebResourceRequest?,
+                    error: android.webkit.WebResourceError?
+                ) {
+                    // Silent - cookie refresh is best-effort
+                    try {
+                        view?.destroy()
+                    } catch (e: Exception) {
+                        // Ignore
+                    }
+                }
+            }
+            // Load in background - WebView is never attached to UI
+            webView.loadUrl("https://www.youtube.com/")
+        } catch (e: Exception) {
+            android.util.Log.w("MainActivity", "Background cookie refresh init failed", e)
         }
     }
 }
