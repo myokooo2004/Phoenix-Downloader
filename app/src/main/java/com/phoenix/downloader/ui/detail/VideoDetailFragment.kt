@@ -111,7 +111,7 @@ class VideoDetailFragment : Fragment() {
 
         // Infinite scroll for related: when the page is scrolled near the
         // bottom, fetch the next page and append it.
-        binding.root.setOnScrollChangeListener(
+        binding.detailScroll.setOnScrollChangeListener(
             androidx.core.widget.NestedScrollView.OnScrollChangeListener { v, _, scrollY, _, _ ->
                 val child = v.getChildAt(0) ?: return@OnScrollChangeListener
                 if (scrollY + v.height >= child.height - 900 &&
@@ -146,36 +146,45 @@ class VideoDetailFragment : Fragment() {
         }
     }
 
-    /** Loads the FIRST related page, or the NEXT page when scrolled near the bottom. */
+    /**
+     * Loads the FIRST related page, or the NEXT page when scrolled near the
+     * bottom. Per the user's spec (2026-10-20) the Related section shows
+     * MOST POPULAR videos (the same trending feed as Home), excluding the
+     * video currently playing. One retry on failure: a single connection
+     * reset on weak mobile data must not leave the section empty.
+     */
     private fun loadRelated() {
-        val videoId = YouTubeApiClient.extractVideoId(videoUrl) ?: return
         if (relatedLoading) return
         relatedLoading = true
         val token = relatedNextToken
         val firstPage = relatedAdapter == null
         viewLifecycleOwner.lifecycleScope.launch {
-            val result = YouTubeApiClient.getRelatedVideos(videoId, 20, videoTitle, token)
+            var result = YouTubeApiClient.getTrending("MM", 20, token)
+            if (result.isFailure) {
+                kotlinx.coroutines.delay(1200)
+                result = YouTubeApiClient.getTrending("MM", 20, token)
+            }
             relatedLoading = false
             if (result.isFailure) {
                 context?.let { ctx ->
                     com.phoenix.downloader.core.CrashLogger.logNonFatal(
                         ctx, "loadRelated",
-                        result.exceptionOrNull() ?: Exception("unknown related failure videoId=$videoId")
+                        result.exceptionOrNull() ?: Exception("unknown related failure")
                     )
                 }
                 return@launch
             }
-            val page = result.getOrNull() ?: return@launch
-            relatedNextToken = page.nextPageToken
-            // Append, skipping duplicates (search pages can overlap).
+            val (pageVideos, nextToken) = result.getOrNull() ?: return@launch
+            relatedNextToken = nextToken
+            // Append, skipping duplicates and the currently playing video.
             val seen = relatedItems.map { it.url }.toHashSet()
-            val fresh = page.videos.filter { it.url !in seen }
+            val fresh = pageVideos.filter { it.url !in seen && it.url != videoUrl }
             val insertAt = relatedItems.size
             relatedItems.addAll(fresh)
             context?.let { ctx ->
                 com.phoenix.downloader.core.CrashLogger.logNonFatal(
                     ctx, "loadRelated.count",
-                    Exception("related total=${relatedItems.size} (+${fresh.size}) next=${relatedNextToken != null} videoId=$videoId")
+                    Exception("related total=${relatedItems.size} (+${fresh.size}) next=${relatedNextToken != null} source=popular")
                 )
             }
             if (firstPage) {

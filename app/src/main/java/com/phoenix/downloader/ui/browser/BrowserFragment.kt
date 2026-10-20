@@ -85,6 +85,28 @@ class BrowserFragment : Fragment() {
             }
         }, "PhoenixDownloader")
 
+        // "Video detected" hint: tap -> open the detail page (player +
+        // related), same as tapping a video on Home (user spec 2026-10-20).
+        binding.tvDetectHint.setOnClickListener {
+            val url = pendingVideoUrl ?: return@setOnClickListener
+            viewLifecycleOwner.lifecycleScope.launch {
+                YtDlpManager.fetchVideoInfo(url)
+                    .onSuccess { info ->
+                        (activity as? MainActivity)?.openVideoDetail(
+                            info.url, info.title,
+                            info.thumbnailUrl ?: "", info.durationSec.toInt()
+                        )
+                    }
+                    .onFailure {
+                        android.widget.Toast.makeText(
+                            requireContext(),
+                            it.message ?: "Could not fetch video",
+                            android.widget.Toast.LENGTH_SHORT
+                        ).show()
+                    }
+            }
+        }
+
         wv.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 return false // stay inside this WebView

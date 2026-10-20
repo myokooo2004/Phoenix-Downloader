@@ -1,28 +1,38 @@
 <?xml version="1.0" encoding="utf-8"?>
-<androidx.core.widget.NestedScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<!-- Root is a vertical LinearLayout: the player is PINNED at the top and
+     only the content below it (title, actions, comments, related) scrolls
+     inside the NestedScrollView (user spec 2026-10-20). -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/bg">
+    android:background="@color/bg"
+    android:orientation="vertical">
+
+    <!-- Video player (auto-play, embedded, pinned) -->
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="210dp"
+        android:background="#000000">
+
+        <androidx.media3.ui.PlayerView
+            android:id="@+id/player_view"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            app:show_buffering="when_playing"
+            app:use_controller="true" />
+    </FrameLayout>
+
+    <androidx.core.widget.NestedScrollView
+        android:id="@+id/detail_scroll"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical">
-
-        <!-- Video player (auto-play, embedded) -->
-        <FrameLayout
-            android:layout_width="match_parent"
-            android:layout_height="210dp"
-            android:background="#000000">
-
-            <androidx.media3.ui.PlayerView
-                android:id="@+id/player_view"
-                android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                app:show_buffering="when_playing"
-                app:use_controller="true" />
-        </FrameLayout>
 
         <!-- Title + channel row -->
         <LinearLayout
@@ -316,4 +326,5 @@
             android:layout_width="match_parent"
             android:layout_height="70dp" />
     </LinearLayout>
-</androidx.core.widget.NestedScrollView>
+    </androidx.core.widget.NestedScrollView>
+</LinearLayout>
