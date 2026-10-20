@@ -158,51 +158,71 @@ class BrowserFragment : Fragment() {
 
     /** Inject Vidmate-style download buttons next to videos in list pages */
     private fun injectDownloadButtons(webView: WebView) {
+        // NOTE: m.youtube.com renders video lists via JS after onPageFinished.
+        // This script retries on a timer + MutationObserver, and returns JSON
+        // diagnostics so the crash log shows exactly what the DOM contained.
         val js = """
             (function() {
-                function addButtons() {
-                    var links = document.querySelectorAll('a[href*="/watch?v="]');
-                    var added = 0;
-                    links.forEach(function(link) {
-                        var href = link.getAttribute('href');
-                        if (!href) return;
-                        var m = href.match(/v=([\w-]{11})/);
-                        if (!m) return;
-                        var vid = m[1];
-                        // Attach to the video renderer container (mobile + desktop layouts),
-                        // not inside the <a> (mobile anchors are unreliable click/position targets).
-                        var container = link.closest('ytm-video-with-context-renderer, ytm-media-item, ytm-compact-video-renderer, ytm-playlist-video-renderer, ytm-playlist-panel-video-renderer, ytd-rich-item-renderer, ytd-video-renderer, ytd-compact-video-renderer, ytd-grid-video-renderer, ytd-playlist-panel-video-renderer, ytd-playlist-video-renderer') || link.parentElement;
-                        if (!container) return;
-                        if (container.querySelector('[data-phoenix-btn]')) return;
-                        var style = window.getComputedStyle(container);
-                        if (style.position === 'static') {
-                            container.style.position = 'relative';
-                        }
-                        var fullUrl = 'https://www.youtube.com/watch?v=' + vid;
-                        var btn = document.createElement('div');
-                        btn.setAttribute('data-phoenix-btn', '1');
-                        btn.innerHTML = '⬇';
-                        btn.style.cssText = 'position:absolute;top:8px;right:8px;width:36px;height:36px;' +
-                            'background:#e53935;color:white;border-radius:50%;display:flex;' +
-                            'align-items:center;justify-content:center;font-size:20px;z-index:2147483647;' +
-                            'cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,0.4);';
-                        btn.addEventListener('click', function(e) {
-                            e.stopPropagation();
-                            e.preventDefault();
-                            PhoenixDownloader.onDownloadClick(fullUrl);
-                        }, true);
-                        container.appendChild(btn);
-                        added++;
-                    });
-                    return added;
+                try {
+                    var debug = {anchors: 0, matched: 0, added: 0, err: null};
+                    function addButtons() {
+                        try {
+                            var links = document.querySelectorAll('a[href*="watch"]');
+                            debug.anchors = links.length;
+                            for (var i = 0; i < links.length; i++) {
+                                var link = links[i];
+                                var href = link.getAttribute('href') || '';
+                                if (href.indexOf('/watch') === -1) continue;
+                                var m = href.match(/[?&]v=([\w-]{11})/);
+                                if (!m) continue;
+                                debug.matched++;
+                                var vid = m[1];
+                                var container = link.closest('ytm-video-with-context-renderer,ytm-media-item,ytm-compact-video-renderer,ytm-playlist-video-renderer,ytm-playlist-panel-video-renderer,ytd-rich-item-renderer,ytd-video-renderer,ytd-compact-video-renderer,ytd-grid-video-renderer,ytd-playlist-panel-video-renderer,ytd-playlist-video-renderer');
+                                if (!container) container = link.parentElement;
+                                if (!container) continue;
+                                if (container.querySelector('[data-phoenix-btn]')) continue;
+                                try {
+                                    if (window.getComputedStyle(container).position === 'static') {
+                                        container.style.position = 'relative';
+                                    }
+                                } catch (e2) {}
+                                var btn = document.createElement('div');
+                                btn.setAttribute('data-phoenix-btn', '1');
+                                btn.textContent = '⬇';
+                                btn.style.cssText = 'position:absolute;top:8px;right:8px;width:36px;height:36px;' +
+                                    'background:#e53935;color:white;border-radius:50%;display:flex;' +
+                                    'align-items:center;justify-content:center;font-size:20px;z-index:2147483647;' +
+                                    'cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,0.4);';
+                                (function(url) {
+                                    btn.addEventListener('click', function(e) {
+                                        e.stopPropagation();
+                                        e.preventDefault();
+                                        PhoenixDownloader.onDownloadClick(url);
+                                    }, true);
+                                })('https://www.youtube.com/watch?v=' + vid);
+                                container.appendChild(btn);
+                                debug.added++;
+                            }
+                        } catch (e) { debug.err = String(e && e.message || e); }
+                        return debug;
+                    }
+                    var d = addButtons();
+                    var tries = 0;
+                    var timer = setInterval(function() {
+                        tries++;
+                        addButtons();
+                        if (tries >= 10) clearInterval(timer);
+                    }, 1000);
+                    if (!window._phoenixObserver && document.body) {
+                        try {
+                            window._phoenixObserver = new MutationObserver(function() { addButtons(); });
+                            window._phoenixObserver.observe(document.body, { childList: true, subtree: true });
+                        } catch (e3) { debug.err = 'observer: ' + e3; }
+                    }
+                    return JSON.stringify(d);
+                } catch (e) {
+                    return JSON.stringify({err: 'outer: ' + (e && e.message || e)});
                 }
-                var n = addButtons();
-                if (!window._phoenixObserver) {
-                    var observer = new MutationObserver(function() { addButtons(); });
-                    observer.observe(document.body, { childList: true, subtree: true });
-                    window._phoenixObserver = observer;
-                }
-                return n;
             })();
         """.trimIndent()
         webView.evaluateJavascript(js) { result ->
@@ -211,7 +231,7 @@ class BrowserFragment : Fragment() {
                     com.phoenix.downloader.core.CrashLogger.logNonFatal(
                         ctx,
                         "BrowserButtons",
-                        Exception("injectDownloadButtons added=$result url=${webView.url}")
+                        Exception("inject result=$result url=${webView.url}")
                     )
                 }
             } catch (e: Exception) { /* diagnostics only */ }

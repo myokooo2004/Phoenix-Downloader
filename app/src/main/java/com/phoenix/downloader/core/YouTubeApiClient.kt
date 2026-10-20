@@ -55,16 +55,17 @@ object YouTubeApiClient {
             val videos = mutableListOf<VideoItem>()
             for (i in 0 until items.length()) {
                 val item = items.getJSONObject(i)
-                // Handle both videos.list (id is string) and search.list (id.videoId) formats
-                val id = try {
-                    item.getString("id")
-                } catch (e: Exception) {
-                    try {
-                        item.getJSONObject("id").getString("videoId")
-                    } catch (e2: Exception) {
-                        continue
-                    }
+                // Handle both videos.list (id is a plain string) and search.list
+                // (id is an object {kind, videoId}). NOTE: JSONObject.getString()
+                // on an object returns its JSON text instead of throwing,
+                // so we MUST check optJSONObject first.
+                val idObj = item.optJSONObject("id")
+                val id = if (idObj != null) {
+                    idObj.optString("videoId", "")
+                } else {
+                    item.optString("id", "")
                 }
+                if (id.isEmpty()) continue
                 val snippet = item.getJSONObject("snippet")
                 val title = snippet.getString("title")
                 val thumbnails = snippet.getJSONObject("thumbnails")
