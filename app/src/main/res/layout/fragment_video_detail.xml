@@ -257,6 +257,7 @@
 
         <!-- Comments header -->
         <LinearLayout
+            android:id="@+id/layout_comments_header"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
@@ -264,6 +265,7 @@
             android:padding="12dp">
 
             <TextView
+                android:id="@+id/tv_comments_title"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
@@ -273,9 +275,10 @@
                 android:textColor="@color/text_primary" />
 
             <TextView
+                android:id="@+id/tv_comments_chevron"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="⌃"
+                android:text="⌄"
                 android:textSize="16sp"
                 android:textColor="@color/text_secondary" />
         </LinearLayout>

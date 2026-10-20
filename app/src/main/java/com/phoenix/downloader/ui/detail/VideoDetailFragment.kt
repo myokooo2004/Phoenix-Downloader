@@ -151,6 +151,9 @@ class VideoDetailFragment : Fragment() {
         }
     }
 
+    private var allComments: List<com.phoenix.downloader.core.CommentItem> = emptyList()
+    private var commentsExpanded = false
+
     private fun loadComments() {
         val videoId = YouTubeApiClient.extractVideoId(videoUrl) ?: return
         viewLifecycleOwner.lifecycleScope.launch {
@@ -158,8 +161,19 @@ class VideoDetailFragment : Fragment() {
             if (result.isSuccess) {
                 val comments = result.getOrNull() ?: emptyList()
                 if (comments.isNotEmpty()) {
+                    allComments = comments
+                    binding.tvCommentsTitle.text = "Comments · ${comments.size}"
                     binding.rvComments.layoutManager = LinearLayoutManager(requireContext())
-                    binding.rvComments.adapter = CommentAdapter(comments)
+                    // Collapsed by default: show first comment as preview
+                    binding.rvComments.adapter = CommentAdapter(comments.take(1))
+                    binding.tvCommentsChevron.text = "⌄"
+                    binding.layoutCommentsHeader.setOnClickListener {
+                        commentsExpanded = !commentsExpanded
+                        binding.rvComments.adapter = CommentAdapter(
+                            if (commentsExpanded) allComments else allComments.take(1)
+                        )
+                        binding.tvCommentsChevron.text = if (commentsExpanded) "⌃" else "⌄"
+                    }
                 }
             }
         }

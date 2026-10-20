@@ -171,7 +171,7 @@ class BrowserFragment : Fragment() {
                         var vid = m[1];
                         // Attach to the video renderer container (mobile + desktop layouts),
                         // not inside the <a> (mobile anchors are unreliable click/position targets).
-                        var container = link.closest('ytm-video-with-context-renderer, ytm-media-item, ytm-compact-video-renderer, ytd-rich-item-renderer, ytd-video-renderer, ytd-compact-video-renderer, ytd-grid-video-renderer') || link.parentElement;
+                        var container = link.closest('ytm-video-with-context-renderer, ytm-media-item, ytm-compact-video-renderer, ytm-playlist-video-renderer, ytm-playlist-panel-video-renderer, ytd-rich-item-renderer, ytd-video-renderer, ytd-compact-video-renderer, ytd-grid-video-renderer, ytd-playlist-panel-video-renderer, ytd-playlist-video-renderer') || link.parentElement;
                         if (!container) return;
                         if (container.querySelector('[data-phoenix-btn]')) return;
                         var style = window.getComputedStyle(container);
