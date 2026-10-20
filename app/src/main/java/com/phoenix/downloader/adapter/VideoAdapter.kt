@@ -22,7 +22,12 @@ class VideoAdapter(
     override fun onBindViewHolder(holder: VH, position: Int) {
         val video = videos[position]
         holder.binding.tvTitle.text = video.title
-        holder.binding.tvDuration.text = "${video.duration / 60}:${String.format("%02d", video.duration % 60)}"
+        if (video.duration > 0) {
+            holder.binding.tvDuration.visibility = android.view.View.VISIBLE
+            holder.binding.tvDuration.text = "${video.duration / 60}:${String.format("%02d", video.duration % 60)}"
+        } else {
+            holder.binding.tvDuration.visibility = android.view.View.GONE
+        }
         Glide.with(holder.itemView.context).load(video.thumbnail).into(holder.binding.ivThumb)
         
         holder.itemView.setOnClickListener { onWatchClick(video) }

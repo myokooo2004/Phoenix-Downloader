@@ -156,43 +156,29 @@ class BrowserFragment : Fragment() {
         binding.tvDetectHint.isVisible = pendingVideoUrl != null
     }
 
-    /** Inject download buttons ON VIDEO THUMBNAILS ONLY (user rule). */
+    /** Inject a small download icon into each video item (user style). */
     private fun injectDownloadButtons(webView: WebView) {
         // NOTE: m.youtube.com renders video lists via JS after onPageFinished.
         // This script retries on a timer + MutationObserver, and returns JSON
         // diagnostics so the crash log shows exactly what the DOM contained.
         //
-        // Placement rule (user, 2026-10-20): the button must sit ON the
-        // video thumbnail itself — never on renderer containers, headers or
-        // the player. So a button is only added when the anchor (or its
-        // renderer's thumbnail anchor) actually wraps a thumbnail <img>,
-        // and it is positioned inside THAT anchor. Anchors inside the
-        // player area are skipped. YouTube recycles list elements while
-        // scrolling, so the button stores its video id in data-vid and the
-        // scan refreshes it — a recycled row never downloads the wrong video.
+        // Placement/style (user, 2026-10-20, from their reference screenshot):
+        // a small plain outline ⬇ icon at the bottom-right of each video
+        // ITEM (next to the item's ⋮ menu) — NOT a red circle floating on
+        // the thumbnail, and never on the player/header. The host is the
+        // list-item renderer itself (no parent fallback), it must contain
+        // a thumbnail image, and the button scrolls away with its item.
+        // YouTube recycles rows while scrolling, so the button stores its
+        // video id in data-vid and each scan refreshes it.
         val js = """
             (function() {
                 try {
                     var debug = {anchors: 0, matched: 0, added: 0, noThumb: 0, inPlayer: 0, err: null};
+                    var RENDERERS = 'ytm-video-with-context-renderer,ytm-media-item,ytm-compact-video-renderer,ytm-playlist-video-renderer,ytm-playlist-panel-video-renderer,ytd-rich-item-renderer,ytd-video-renderer,ytd-compact-video-renderer,ytd-grid-video-renderer,ytd-playlist-panel-video-renderer,ytd-playlist-video-renderer';
                     function videoIdOf(a) {
                         var href = a.getAttribute('href') || '';
                         var m = href.match(/[?&]v=([\w-]{11})/);
                         return m ? m[1] : null;
-                    }
-                    function thumbnailHost(link, vid) {
-                        // The anchor itself wraps the thumbnail image
-                        if (link.querySelector('img')) return link;
-                        // Otherwise find the thumbnail anchor of the same
-                        // video inside the list-item renderer
-                        var container = link.closest('ytm-video-with-context-renderer,ytm-media-item,ytm-compact-video-renderer,ytm-playlist-video-renderer,ytm-playlist-panel-video-renderer,ytd-rich-item-renderer,ytd-video-renderer,ytd-compact-video-renderer,ytd-grid-video-renderer,ytd-playlist-panel-video-renderer,ytd-playlist-video-renderer');
-                        if (!container) return null;
-                        var anchors = container.querySelectorAll('a[href*="watch"]');
-                        for (var j = 0; j < anchors.length; j++) {
-                            if (videoIdOf(anchors[j]) === vid && anchors[j].querySelector('img')) {
-                                return anchors[j];
-                            }
-                        }
-                        return null;
                     }
                     function addButtons() {
                         try {
@@ -203,8 +189,9 @@ class BrowserFragment : Fragment() {
                                 var vid = videoIdOf(link);
                                 if (!vid) continue;
                                 debug.matched++;
-                                var host = thumbnailHost(link, vid);
-                                if (!host) { debug.noThumb++; continue; }
+                                var host = link.closest(RENDERERS);
+                                if (!host) continue;
+                                if (!host.querySelector('img')) { debug.noThumb++; continue; }
                                 if (host.closest('ytm-player,#player,.html5-video-player,ytm-inline-player')) {
                                     debug.inPlayer++; continue;
                                 }
@@ -223,10 +210,9 @@ class BrowserFragment : Fragment() {
                                 btn.setAttribute('data-phoenix-btn', '1');
                                 btn.setAttribute('data-vid', vid);
                                 btn.textContent = '⬇';
-                                btn.style.cssText = 'position:absolute;top:6px;right:6px;width:36px;height:36px;' +
-                                    'background:#e53935;color:white;border-radius:50%;display:flex;' +
-                                    'align-items:center;justify-content:center;font-size:20px;z-index:9999;' +
-                                    'cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,0.4);';
+                                btn.style.cssText = 'position:absolute;right:30px;bottom:4px;width:32px;height:32px;' +
+                                    'color:#616161;display:flex;align-items:center;justify-content:center;' +
+                                    'font-size:19px;z-index:9999;cursor:pointer;background:transparent;';
                                 btn.addEventListener('click', function(e) {
                                     e.stopPropagation();
                                     e.preventDefault();
