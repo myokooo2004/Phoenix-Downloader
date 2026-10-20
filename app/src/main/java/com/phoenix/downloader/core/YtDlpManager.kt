@@ -246,6 +246,15 @@ object YtDlpManager {
             val sortedVideo = video.sortedBy {
                 it.label.filter { c -> c.isDigit() }.toIntOrNull() ?: 0
             }
+            // Diagnostic: exactly which formats yt-dlp returned (proves whether
+            // >360p / non-MP4 formats exist for a given video). Lands in crash.log.
+            val allVideo = (music + sortedVideo)
+            logNote(
+                "fetchFormats.list",
+                "url=$url audio=${music.size} video=${sortedVideo.size} " +
+                    "videoFormats=[" + sortedVideo.joinToString(", ") { "${it.label}/${it.format}/${it.id}" } + "] " +
+                    "audioFormats=[" + music.joinToString(", ") { "${it.label}/${it.format}/${it.id}" } + "] total=${allVideo.size}"
+            )
             Result.success(FormatsResult(music = music, video = sortedVideo))
         } catch (e: Exception) {
             logFailure("fetchFormats", e)

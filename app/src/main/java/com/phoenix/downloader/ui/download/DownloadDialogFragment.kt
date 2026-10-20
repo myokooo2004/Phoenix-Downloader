@@ -24,6 +24,8 @@ class DownloadDialogFragment : BottomSheetDialogFragment() {
     private var videoThumbnail = ""
     private var videoDuration = 0
     private var selectedFormatId = "best"
+    private var videoAdapterRef: FormatAdapter? = null
+    private var audioAdapterRef: FormatAdapter? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -36,6 +38,24 @@ class DownloadDialogFragment : BottomSheetDialogFragment() {
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
         _binding = DialogDownloadBinding.inflate(inflater, container, false)
         return binding.root
+    }
+
+    override fun onStart() {
+        super.onStart()
+        // Give the sheet a FIXED height (92% of screen) and force it expanded.
+        // With wrap_content height, the weighted ScrollView measures at full
+        // content height and pushes the DOWNLOAD button off the visible sheet
+        // (field-observed: button invisible / list not scrollable).
+        val sheet = dialog?.findViewById<View>(
+            com.google.android.material.R.id.design_bottom_sheet
+        ) ?: return
+        val screenHeight = resources.displayMetrics.heightPixels
+        sheet.layoutParams.height = (screenHeight * 0.92).toInt()
+        sheet.requestLayout()
+        com.google.android.material.bottomsheet.BottomSheetBehavior.from(sheet).apply {
+            state = com.google.android.material.bottomsheet.BottomSheetBehavior.STATE_EXPANDED
+            skipCollapsed = true
+        }
     }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
@@ -75,12 +95,25 @@ class DownloadDialogFragment : BottomSheetDialogFragment() {
                 if (videoList.isNotEmpty()) {
                     binding.layoutVideoSection.visibility = View.VISIBLE
                     binding.rvVideoFormats.layoutManager = GridLayoutManager(requireContext(), 2)
-                    binding.rvVideoFormats.adapter = FormatAdapter(videoList) { selectedFormatId = it.id }
+                    val videoAdapter = FormatAdapter(videoList) { chosen ->
+                        selectedFormatId = chosen.id
+                        audioAdapterRef?.clearSelection()
+                    }
+                    videoAdapterRef = videoAdapter
+                    binding.rvVideoFormats.adapter = videoAdapter
+                    // Default selection: first video format only (VidMate-style).
+                    videoAdapter.preselect(0)
+                    selectedFormatId = videoList[0].id
                 }
                 if (audioList.isNotEmpty()) {
                     binding.layoutMusicSection.visibility = View.VISIBLE
                     binding.rvAudioFormats.layoutManager = GridLayoutManager(requireContext(), 2)
-                    binding.rvAudioFormats.adapter = FormatAdapter(audioList) { selectedFormatId = it.id }
+                    val audioAdapter = FormatAdapter(audioList) { chosen ->
+                        selectedFormatId = chosen.id
+                        videoAdapterRef?.clearSelection()
+                    }
+                    audioAdapterRef = audioAdapter
+                    binding.rvAudioFormats.adapter = audioAdapter
                 }
                 if (videoList.isEmpty() && audioList.isEmpty()) {
                     Toast.makeText(requireContext(), "No formats found", Toast.LENGTH_SHORT).show()

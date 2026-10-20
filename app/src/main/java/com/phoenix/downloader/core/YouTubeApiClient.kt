@@ -151,26 +151,34 @@ object YouTubeApiClient {
             val items = json.getJSONArray("items")
             val videos = mutableListOf<VideoItem>()
             for (i in 0 until items.length()) {
-                val item = items.getJSONObject(i)
-                val idObj = item.getJSONObject("id")
-                val id = idObj.getString("videoId")
-                val snippet = item.getJSONObject("snippet")
-                val title = snippet.getString("title")
-                val thumbnails = snippet.getJSONObject("thumbnails")
-                val thumbObj = when {
-                    thumbnails.has("high") -> thumbnails.getJSONObject("high")
-                    thumbnails.has("medium") -> thumbnails.getJSONObject("medium")
-                    else -> thumbnails.getJSONObject("default")
-                }
-                val thumbUrl = thumbObj.getString("url")
-                videos.add(
-                    VideoItem(
-                        url = "https://www.youtube.com/watch?v=$id",
-                        title = title,
-                        thumbnail = thumbUrl,
-                        duration = 0
+                // Defensive per-item parse: one malformed item (e.g. a channel
+                // result without videoId) must not kill the whole list.
+                try {
+                    val item = items.getJSONObject(i)
+                    val idObj = item.optJSONObject("id") ?: continue
+                    val id = idObj.optString("videoId", "")
+                    if (id.isEmpty()) continue
+                    val snippet = item.getJSONObject("snippet")
+                    val title = snippet.optString("title", "")
+                    val thumbnails = snippet.getJSONObject("thumbnails")
+                    val thumbObj = when {
+                        thumbnails.has("high") -> thumbnails.getJSONObject("high")
+                        thumbnails.has("medium") -> thumbnails.getJSONObject("medium")
+                        else -> thumbnails.getJSONObject("default")
+                    }
+                    val thumbUrl = thumbObj.getString("url")
+                    videos.add(
+                        VideoItem(
+                            url = "https://www.youtube.com/watch?v=$id",
+                            title = title,
+                            thumbnail = thumbUrl,
+                            duration = 0
+                        )
                     )
-                )
+                } catch (e: Exception) {
+                    Log.w(TAG, "getRelatedVideos: skipping bad item $i", e)
+                    continue
+                }
             }
             Result.success(videos)
         } catch (e: Exception) {

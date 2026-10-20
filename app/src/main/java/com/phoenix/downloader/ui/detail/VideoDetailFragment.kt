@@ -127,6 +127,14 @@ class VideoDetailFragment : Fragment() {
         val videoId = YouTubeApiClient.extractVideoId(videoUrl) ?: return
         viewLifecycleOwner.lifecycleScope.launch {
             val result = YouTubeApiClient.getRelatedVideos(videoId, 20, videoTitle)
+            if (result.isFailure) {
+                context?.let { ctx ->
+                    com.phoenix.downloader.core.CrashLogger.logNonFatal(
+                        ctx, "loadRelated",
+                        result.exceptionOrNull() ?: Exception("unknown related failure videoId=$videoId")
+                    )
+                }
+            }
             val list = if (result.isSuccess) {
                 result.getOrNull() ?: emptyList()
             } else emptyList()

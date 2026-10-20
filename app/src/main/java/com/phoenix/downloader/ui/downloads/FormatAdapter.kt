@@ -11,8 +11,27 @@ import com.phoenix.downloader.R
 data class FormatInfo(val id: String, val label: String, val size: String, val isAudio: Boolean)
 
 class FormatAdapter(private val formats: List<FormatInfo>, private val onItemSelected: (FormatInfo) -> Unit) : RecyclerView.Adapter<FormatAdapter.VH>() {
-    private var selectedPosition = 0
-    init { if (formats.isNotEmpty()) onItemSelected(formats[0]) }
+    // -1 = nothing selected. The dialog coordinates ONE selection across the
+    // audio and video grids: selecting in one grid clears the other.
+    private var selectedPosition = -1
+
+    /** Select an item WITHOUT firing the callback (used for the initial default). */
+    fun preselect(position: Int) {
+        if (position in formats.indices) {
+            selectedPosition = position
+            notifyItemChanged(position)
+        }
+    }
+
+    fun clearSelection() {
+        if (selectedPosition >= 0) {
+            val old = selectedPosition
+            selectedPosition = -1
+            notifyItemChanged(old)
+        }
+    }
+
+    fun selectedItem(): FormatInfo? = formats.getOrNull(selectedPosition)
 
     class VH(v: View) : RecyclerView.ViewHolder(v) {
         val rbSelect: RadioButton = v.findViewById(R.id.rb_select)
@@ -31,7 +50,7 @@ class FormatAdapter(private val formats: List<FormatInfo>, private val onItemSel
         holder.rbSelect.isChecked = (position == selectedPosition)
 
         holder.itemView.setOnClickListener {
-            notifyItemChanged(selectedPosition)
+            if (selectedPosition >= 0) notifyItemChanged(selectedPosition)
             selectedPosition = holder.adapterPosition
             notifyItemChanged(selectedPosition)
             onItemSelected(format)
