@@ -3,6 +3,7 @@ package com.phoenix.downloader.core
 import android.util.Log
 import com.phoenix.downloader.ui.home.VideoItem
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.net.HttpURLConnection
@@ -198,6 +199,22 @@ object YouTubeApiClient {
      * previous page for infinite scrolling.
      */
     suspend fun getRelatedVideos(
+        videoId: String,
+        maxResults: Int = 20,
+        query: String? = null,
+        pageToken: String? = null
+    ): Result<RelatedPage> {
+        // One retry on a transient network failure: a single connection
+        // reset on weak mobile data used to leave Related permanently empty
+        // for that screen (field log 2026-10-20).
+        val first = getRelatedVideosOnce(videoId, maxResults, query, pageToken)
+        if (first.isSuccess) return first
+        if (first.exceptionOrNull() !is java.io.IOException) return first
+        delay(1200)
+        return getRelatedVideosOnce(videoId, maxResults, query, pageToken)
+    }
+
+    private suspend fun getRelatedVideosOnce(
         videoId: String,
         maxResults: Int = 20,
         query: String? = null,

@@ -34,6 +34,24 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
+        // Back behavior: pushed screens pop normally; from My Files go back
+        // to Home (top-level screens are replace()d without a back stack, so
+        // the default back press would exit the app from My Files).
+        onBackPressedDispatcher.addCallback(this, object : androidx.activity.OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                when {
+                    supportFragmentManager.backStackEntryCount > 0 ->
+                        supportFragmentManager.popBackStack()
+                    supportFragmentManager.findFragmentById(R.id.nav_host) is DownloadsFragment ->
+                        showHome()
+                    else -> {
+                        isEnabled = false
+                        onBackPressedDispatcher.onBackPressed()
+                    }
+                }
+            }
+        })
+
         // Download engine: reloads persisted records; unfinished downloads
         // re-queue and resume automatically.
         com.phoenix.downloader.core.DownloadEngine.init(this)
