@@ -16,7 +16,7 @@ object YouTubeApiClient {
     private const val TAG = "YouTubeApiClient"
     // API proxied via Cloudflare Worker (keeps key server-side, adds edge caching).
     // Worker handles regionCode quirks (e.g. YouTube rejects regionCode=MM).
-    private const val WORKER_BASE = "https://phoenix-downloader-api.myokooo2004.workers.dev"
+    private const val WORKER_BASE = "https://api.phoenixdl.dpdns.org"
     // Legacy direct API (kept for reference; not used)
     private const val API_KEY = "AIzaSyDVpveH9BzSa7QZh7QT7Uh2zMasfEWR8Pw"
     private const val BASE_URL = "https://www.googleapis.com/youtube/v3/videos"
