@@ -30,6 +30,15 @@ object YtDlpManager {
     private var updateChecked = false
     private var appContext: Context? = null
 
+    /**
+     * yt-dlp version BAKED INTO the APK as res/raw/ytdlp (the app module's raw
+     * resource shadows the library's, so the library extracts THIS file on
+     * first init). User order 2026-10-20: replace the bundled version
+     * directly with the latest — no old version, ever. The runtime self-update
+     * (AUTO_UPDATE) can still advance beyond this floor afterwards.
+     */
+    private const val BUNDLED_YTDLP_VERSION = "2026.08.19"
+
     /** Set when init() throws; the real reason fetches fail. */
     private var initError: Throwable? = null
 
@@ -37,6 +46,31 @@ object YtDlpManager {
         if (initialized) return
         try {
             appContext = context.applicationContext
+            // One-time purge per BUNDLED_YTDLP_VERSION change: installs made
+            // from older APKs already extracted the OLD yt-dlp into
+            // noBackupFilesDir, and the library only extracts res/raw/ytdlp
+            // when the binary is missing. Delete the extracted dir so the
+            // baked-in 2026.08.19 is extracted on this init. Runs BEFORE
+            // YoutubeDL.init; the marker makes later launches (and any newer
+            // self-updated version) untouched.
+            try {
+                val prefs = appContext!!.getSharedPreferences("phoenix_ytdlp", Context.MODE_PRIVATE)
+                if (prefs.getString("bundled_ytdlp_version", null) != BUNDLED_YTDLP_VERSION) {
+                    val dir = java.io.File(
+                        appContext!!.noBackupFilesDir, "youtubedl-android/yt-dlp"
+                    )
+                    if (dir.exists()) dir.deleteRecursively()
+                    prefs.edit()
+                        .putString("bundled_ytdlp_version", BUNDLED_YTDLP_VERSION)
+                        .apply()
+                    logNote(
+                        "YtDlpManager.bundled",
+                        "purged extracted yt-dlp; baked-in version $BUNDLED_YTDLP_VERSION will be extracted"
+                    )
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("YtDlpManager", "bundled yt-dlp purge failed", e)
+            }
             YoutubeDL.getInstance().init(appContext!!)
             // Initialize FFmpeg for audio/video merging (4K downloads)
             try {
