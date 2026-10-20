@@ -46,7 +46,6 @@ class SearchFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         binding.tvSearchQuery.text = query
-        binding.btnSearchBack.setOnClickListener { requireActivity().supportFragmentManager.popBackStack() }
         binding.btnSearchDownloads.setOnClickListener { (activity as? MainActivity)?.showDownloads() }
 
         adapter = VideoAdapter(

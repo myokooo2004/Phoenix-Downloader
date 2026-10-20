@@ -13,21 +13,10 @@
         android:layout_height="wrap_content"
         android:gravity="center_vertical"
         android:orientation="horizontal"
-        android:paddingStart="4dp"
+        android:paddingStart="12dp"
         android:paddingTop="10dp"
         android:paddingEnd="8dp"
         android:paddingBottom="6dp">
-
-        <TextView
-            android:id="@+id/btn_entry_back"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
-            android:clickable="true"
-            android:focusable="true"
-            android:gravity="center"
-            android:text="←"
-            android:textColor="@color/text_primary"
-            android:textSize="22sp" />
 
         <LinearLayout
             android:layout_width="0dp"
@@ -132,6 +121,7 @@
                 android:layout_marginTop="8dp" />
 
             <TextView
+                android:id="@+id/hot_title"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="22dp"

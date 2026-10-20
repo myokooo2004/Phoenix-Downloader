@@ -10,19 +10,8 @@
         android:layout_height="56dp"
         android:gravity="center_vertical"
         android:orientation="horizontal"
-        android:paddingStart="4dp"
+        android:paddingStart="16dp"
         android:paddingEnd="12dp">
-
-        <TextView
-            android:id="@+id/btn_search_back"
-            android:layout_width="44dp"
-            android:layout_height="44dp"
-            android:clickable="true"
-            android:focusable="true"
-            android:gravity="center"
-            android:text="←"
-            android:textColor="@color/text_primary"
-            android:textSize="22sp" />
 
         <TextView
             android:id="@+id/tv_search_query"

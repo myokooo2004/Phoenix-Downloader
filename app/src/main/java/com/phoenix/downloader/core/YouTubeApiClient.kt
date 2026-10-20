@@ -355,6 +355,25 @@ object YouTubeApiClient {
         }
     }
 
+    /**
+     * Hot Searches composed by the Worker from YouTube's own suggestion
+     * rankings (no hand-picked terms anywhere). Empty on failure — the
+     * search screen then keeps its cached list, or hides the section.
+     */
+    suspend fun fetchHotSearches(): List<String> = withContext(Dispatchers.IO) {
+        try {
+            val conn = URL("$WORKER_BASE/hot").openConnection() as HttpURLConnection
+            conn.connectTimeout = 8000
+            conn.readTimeout = 8000
+            if (conn.responseCode != 200) return@withContext emptyList()
+            val arr = JSONObject(conn.inputStream.bufferedReader().readText()).optJSONArray("terms")
+                ?: return@withContext emptyList()
+            (0 until arr.length()).map { arr.optString(it) }.filter { it.isNotBlank() }
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
     fun extractVideoId(url: String): String? {
         return try {
             when {

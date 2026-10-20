@@ -64,7 +64,6 @@ class SearchEntryFragment : Fragment() {
         bindHistoryChips()
         bindHotChips()
 
-        binding.btnEntryBack.setOnClickListener { parentFragmentManager.popBackStack() }
         binding.btnClearHistory.setOnClickListener {
             SearchHistoryStore.clear(requireContext())
             bindHistoryChips()
@@ -163,18 +162,27 @@ class SearchEntryFragment : Fragment() {
     }
 
     private fun bindHotChips() {
-        // Same popular Myanmar searches as the reference UI.
-        val hot = listOf(
-            "🔥 2d" to "2d",
-            "🔥 2dlive" to "2dlive",
-            "ဘိုးထင်" to "ဘိုးထင်",
-            "နေထူးနိုင်" to "နေထူးနိုင်",
-            "တရားတော်" to "တရားတော်",
-            "အောင်မြတ်သာ" to "အောင်မြတ်သာ"
-        )
+        // Contents come from YouTube itself (Worker-composed from the
+        // suggestion rankings; see YouTubeApiClient.fetchHotSearches).
+        // Cached terms render instantly; a fresh fetch replaces them.
+        // Nothing cached + fetch failed -> the section hides rather than
+        // showing anything that did not come from YouTube.
+        showHotChips(com.phoenix.downloader.core.HotSearchCache.load(requireContext()))
+        viewLifecycleOwner.lifecycleScope.launch {
+            val fresh = YouTubeApiClient.fetchHotSearches()
+            if (_binding == null || fresh.isEmpty()) return@launch
+            com.phoenix.downloader.core.HotSearchCache.save(requireContext(), fresh)
+            showHotChips(fresh)
+        }
+    }
+
+    private fun showHotChips(terms: List<String>) {
+        val has = terms.isNotEmpty()
+        binding.hotTitle.visibility = if (has) View.VISIBLE else View.GONE
+        binding.chipsHot.visibility = if (has) View.VISIBLE else View.GONE
         binding.chipsHot.removeAllViews()
-        for ((label, query) in hot) {
-            binding.chipsHot.addView(makeChip(label) { submit(query) })
+        for (term in terms) {
+            binding.chipsHot.addView(makeChip(term) { submit(term) })
         }
     }
 

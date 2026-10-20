@@ -177,6 +177,57 @@ async function handleRequest(request) {
     return (best || firstError).resp;
   }
 
+  if (path === "/hot") {
+    // Hot Searches, the genuine-YouTube way (user spec 2026-10-20):
+    // YouTube shows no hot list for an empty search box (suggest returns
+    // [] for an empty query); its real popularity signal is the
+    // suggestion ranking. So compose the list from YouTube's own top
+    // suggestions for each Myanmar initial letter — every term is
+    // YouTube-ranked, nothing is hand-picked. Refreshed daily via the
+    // edge cache below.
+    const cache = caches.default;
+    const cacheKey = new Request(url.toString(), { method: "GET" });
+    const hit = await cache.match(cacheKey);
+    if (hit) return hit;
+    const seeds = ["အ", "က", "ခ", "ဂ", "စ", "ဆ", "ဇ", "တ", "ထ", "န", "ပ", "ဖ", "ဗ", "မ", "ယ", "ရ", "လ", "ဝ", "သ", "ဟ"];
+    const perSeed = await Promise.all(seeds.map(async (seed) => {
+      try {
+        const r = await fetch(
+          "https://suggestqueries.google.com/complete/search?client=firefox&ds=yt&q=" + encodeURIComponent(seed),
+          { headers: { "User-Agent": "Mozilla/5.0 (Linux; Android 14)" } }
+        );
+        if (!r.ok) return [];
+        const data = await r.json();
+        return Array.isArray(data[1]) ? data[1] : [];
+      } catch (e) {
+        return [];
+      }
+    }));
+    const scores = new Map();
+    for (const list of perSeed) {
+      list.slice(0, 5).forEach((term, rank) => {
+        const t = String(term).trim();
+        if (!t || t.length > 30) return;
+        if (/[0-9၀-၉]/.test(t)) return; // episode/part numbers = noise
+        scores.set(t, (scores.get(t) || 0) + (5 - rank));
+      });
+    }
+    const terms = [...scores.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 14)
+      .map((e) => e[0]);
+    const ttl = terms.length ? 86400 : 300;
+    const resp = new Response(JSON.stringify({ terms }), {
+      headers: {
+        "Content-Type": "application/json",
+        "Cache-Control": `public, max-age=${ttl}`,
+        "Access-Control-Allow-Origin": "*",
+      },
+    });
+    await cache.put(cacheKey, resp.clone());
+    return resp;
+  }
+
   if (path === "/search") {
     const q = url.searchParams.get("q");
     if (!q) return jsonError(400, "q required");

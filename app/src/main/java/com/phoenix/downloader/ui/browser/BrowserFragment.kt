@@ -147,13 +147,29 @@ class BrowserFragment : Fragment() {
             }
         }
 
-        binding.btnBack.setOnClickListener { if (wv.canGoBack()) wv.goBack() }
         binding.btnForward.setOnClickListener { if (wv.canGoForward()) wv.goForward() }
         binding.btnRefresh.setOnClickListener { wv.reload() }
         binding.btnCloseBrowser.setOnClickListener { parentFragmentManager.popBackStack() }
-        binding.btnBarBack.setOnClickListener { if (wv.canGoBack()) wv.goBack() }
         binding.btnBarForward.setOnClickListener { if (wv.canGoForward()) wv.goForward() }
         binding.btnBarHome.setOnClickListener { (activity as? MainActivity)?.showHome() }
+
+        // No on-screen back buttons anywhere (user rule, 2026-10-20): the
+        // PHONE back key walks the WebView history first; at the start of
+        // the history it hands over to the activity callback, which pops
+        // the browser.
+        requireActivity().onBackPressedDispatcher.addCallback(
+            viewLifecycleOwner,
+            object : androidx.activity.OnBackPressedCallback(true) {
+                override fun handleOnBackPressed() {
+                    if (wv.canGoBack()) {
+                        wv.goBack()
+                    } else {
+                        isEnabled = false
+                        requireActivity().onBackPressedDispatcher.onBackPressed()
+                    }
+                }
+            }
+        )
 
         binding.fabDownload.setOnClickListener {
             val url = pendingVideoUrl ?: return@setOnClickListener

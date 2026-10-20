@@ -16,13 +16,6 @@
         android:background="@color/card">
 
         <ImageView
-            android:id="@+id/btn_back"
-            android:layout_width="36dp"
-            android:layout_height="36dp"
-            android:padding="8dp"
-            android:src="@drawable/ic_back" />
-
-        <ImageView
             android:id="@+id/btn_forward"
             android:layout_width="36dp"
             android:layout_height="36dp"
@@ -135,13 +128,6 @@
         android:paddingBottom="8dp"
         android:background="@color/card">
 
-        <ImageView
-            android:id="@+id/btn_bar_back"
-            android:layout_width="0dp"
-            android:layout_height="40dp"
-            android:layout_weight="1"
-            android:padding="10dp"
-            android:src="@drawable/ic_back" />
         <ImageView
             android:id="@+id/btn_bar_forward"
             android:layout_width="0dp"
