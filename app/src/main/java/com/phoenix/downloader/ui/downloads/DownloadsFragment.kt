@@ -49,6 +49,14 @@ class DownloadsFragment : Fragment() {
         viewLifecycleOwner.lifecycleScope.launch {
             DownloadEngine.records.collect { rebuild() }
         }
+        // Belt-and-braces: also refresh once a second while visible, so
+        // live progress can never sit stale on screen.
+        viewLifecycleOwner.lifecycleScope.launch {
+            while (true) {
+                kotlinx.coroutines.delay(1000)
+                if (_binding != null) rebuild()
+            }
+        }
     }
 
     override fun onResume() {

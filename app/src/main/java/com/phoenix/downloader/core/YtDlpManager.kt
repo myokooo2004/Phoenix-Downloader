@@ -365,18 +365,68 @@ object YtDlpManager {
      * Resolve ONE direct playable URL (video + audio together) for ExoPlayer.
      * "bv*+ba" would return two URLs and the player would get video only.
      */
-    suspend fun resolveStreamUrl(url: String): Result<String?> = withContext(Dispatchers.IO) {
+    /** Direct playable stream URLs for the preview player. */
+    data class StreamUrls(val videoUrl: String, val audioUrl: String?)
+
+    /**
+     * Resolve playable stream URLs (<=720p for a fast preview start).
+     *
+     * The old single-URL selector ("b[ext=mp4]") died in the field with
+     * "Requested format is not available": modern YouTube serves no muxed
+     * file beyond 360p (and often not even that). So resolve a DASH pair
+     * and let the player merge video+audio (MergingMediaSource). The JSON
+     * dump's requested_formats say exactly which URL is video vs audio.
+     */
+    suspend fun resolveStreamUrls(url: String): Result<StreamUrls> = withContext(Dispatchers.IO) {
         try {
             if (!isReady()) return@withContext Result.failure(Exception(notReadyReason()))
             ensureUpdated()
-            val request = baseRequest(url)
-            request.addOption("-g")
-            request.addOption("-f", "b[ext=mp4]/b")
-            val response = YoutubeDL.getInstance().execute(request)
-            val streamUrl = response.out.lineSequence().firstOrNull()?.trim()
-            Result.success(streamUrl?.ifEmpty { null })
+            var lastError: Exception? = null
+            for (client in listOf<String?>(null, "tv")) {
+                try {
+                    val request = baseRequest(url)
+                    if (client != null) {
+                        request.addOption("--extractor-args", "youtube:player_client=$client")
+                    }
+                    request.addOption("-f", "bv*[height<=720]+ba/b[height<=720]/bv*+ba/b")
+                    request.addOption("--dump-json")
+                    request.addOption("--no-download")
+                    val response = YoutubeDL.getInstance().execute(request)
+                    val json = org.json.JSONObject(response.out)
+                    val requested = json.optJSONArray("requested_formats")
+                    var video: String? = null
+                    var audio: String? = null
+                    if (requested != null && requested.length() > 0) {
+                        for (i in 0 until requested.length()) {
+                            val f = requested.getJSONObject(i)
+                            val u = f.optString("url", "")
+                            if (u.isEmpty()) continue
+                            val vc = f.optString("vcodec", "none")
+                            val ac = f.optString("acodec", "none")
+                            if (vc != "none" && video == null) video = u
+                            else if (vc == "none" && ac != "none" && audio == null) audio = u
+                        }
+                    }
+                    if (video == null) {
+                        // Single muxed format selected
+                        video = json.optString("url", "").ifEmpty { null }
+                    }
+                    if (video != null) {
+                        logNote(
+                            "resolveStreamUrls",
+                            "client=${client ?: "default"} video=yes audio=${if (audio != null) "yes" else "no"}"
+                        )
+                        return@withContext Result.success(StreamUrls(video, audio))
+                    }
+                    lastError = Exception("client=${client ?: "default"}: no stream urls")
+                } catch (e: Exception) {
+                    lastError = e
+                    logNote("resolveStreamUrls.attempt", "client=${client ?: "default"}: ${e.message}")
+                }
+            }
+            Result.failure(lastError ?: Exception("No playable stream found"))
         } catch (e: Exception) {
-            logFailure("resolveStreamUrl", e)
+            logFailure("resolveStreamUrls", e)
             Result.failure(e)
         }
     }

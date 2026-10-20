@@ -58,15 +58,14 @@ class PlayerFragment : Fragment() {
             // first (same engine the download flow uses).
             Toast.makeText(requireContext(), "Loading video...", Toast.LENGTH_SHORT).show()
             viewLifecycleOwner.lifecycleScope.launch {
-                val result = YtDlpManager.resolveStreamUrl(videoUrl)
-                result.onSuccess { streamUrl ->
-                    if (!streamUrl.isNullOrEmpty()) {
-                        exoPlayer?.setMediaItem(MediaItem.fromUri(streamUrl))
-                        exoPlayer?.prepare()
-                        exoPlayer?.play()
-                    } else {
-                        Toast.makeText(requireContext(), "Could not resolve video stream", Toast.LENGTH_LONG).show()
-                    }
+                val result = YtDlpManager.resolveStreamUrls(videoUrl)
+                result.onSuccess { streams ->
+                    val exo = exoPlayer ?: return@onSuccess
+                    exo.setMediaSource(
+                        com.phoenix.downloader.core.PlayerMediaSource.fromStreams(requireContext(), streams)
+                    )
+                    exo.prepare()
+                    exo.play()
                 }.onFailure { e ->
                     Toast.makeText(requireContext(), "Play failed: ${e.message}", Toast.LENGTH_LONG).show()
                 }

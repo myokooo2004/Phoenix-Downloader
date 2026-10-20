@@ -302,9 +302,12 @@ object DownloadEngine {
         while (true) {
             delay(1000)
             if (item.status != DownloadItem.Status.DOWNLOADING) continue
-            val prefix = baseName(item)
+            // Match by the unique "[id]" marker, NOT the title prefix:
+            // yt-dlp may normalize title characters in on-disk names, which
+            // silently broke prefix matching in the field (0 B shown while
+            // the notification already had real progress).
             val bytes = dir.listFiles()
-                ?.filter { it.name.startsWith(prefix) && !it.name.endsWith(".aria2") }
+                ?.filter { it.name.contains("[${item.id}]") && !it.name.endsWith(".aria2") }
                 ?.sumOf { it.length() } ?: 0L
             val now = System.currentTimeMillis()
             if (lastBytes >= 0 && now > lastTime) {
@@ -330,19 +333,19 @@ object DownloadEngine {
 
     private fun deletePartials(item: DownloadItem) {
         val dir = File(item.destPath)
-        val prefix = baseName(item)
-        dir.listFiles()?.filter { it.name.startsWith(prefix) }?.forEach {
+        dir.listFiles()?.filter { it.name.contains("[${item.id}]") }?.forEach {
             runCatching { it.delete() }
         }
     }
 
     private fun findProducedFile(dir: File, item: DownloadItem): File? {
-        val prefix = baseName(item)
         return dir.listFiles()
             ?.filter {
-                it.name.startsWith(prefix) &&
+                it.name.contains("[${item.id}]") &&
                     !it.name.endsWith(".part") && !it.name.endsWith(".ytdl") &&
-                    !it.name.endsWith(".temp") && !it.name.endsWith(".aria2")
+                    !it.name.endsWith(".temp") && !it.name.endsWith(".aria2") &&
+                    // Not a DASH fragment ("Title [id].f401.mp4")
+                    !it.name.contains(Regex("\\.f\\d+\\."))
             }
             ?.maxByOrNull { it.lastModified() }
     }

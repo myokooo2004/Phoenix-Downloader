@@ -53,6 +53,19 @@ class MainActivity : AppCompatActivity() {
                 else -> false
             }
         }
+
+        // The floating bottom bar belongs to the top-level screens only.
+        // On pushed screens (player, detail, search, browser) it overlaps
+        // content and player controls — hide it whenever the back stack
+        // is non-empty, restore it when back at Home / My Files.
+        supportFragmentManager.addOnBackStackChangedListener {
+            binding.bottomNav.visibility =
+                if (supportFragmentManager.backStackEntryCount == 0) {
+                    android.view.View.VISIBLE
+                } else {
+                    android.view.View.GONE
+                }
+        }
     }
 
     fun showHome() {

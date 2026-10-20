@@ -127,11 +127,12 @@ class VideoDetailFragment : Fragment() {
             // Resolve stream URL via yt-dlp and play
             viewLifecycleOwner.lifecycleScope.launch {
                 try {
-                    val result = YtDlpManager.resolveStreamUrl(videoUrl)
-                    val streamUrl = result.getOrNull()
-                    if (!streamUrl.isNullOrEmpty()) {
-                        val mediaItem = MediaItem.fromUri(streamUrl)
-                        exoPlayer.setMediaItem(mediaItem)
+                    val result = YtDlpManager.resolveStreamUrls(videoUrl)
+                    val streams = result.getOrNull()
+                    if (streams != null) {
+                        exoPlayer.setMediaSource(
+                            com.phoenix.downloader.core.PlayerMediaSource.fromStreams(ctx, streams)
+                        )
                         exoPlayer.prepare()
                         exoPlayer.play() // Auto-play
                     }
