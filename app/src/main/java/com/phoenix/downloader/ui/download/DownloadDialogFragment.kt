@@ -81,6 +81,10 @@ class DownloadDialogFragment : DialogFragment() {
             binding.tvDlgDuration.text = "%d:%02d".format(m, s)
         }
         fetchFormats()
+        // DOWNLOAD stays disabled until a format is actually selected —
+        // tapping it early used to enqueue a junk "best" download.
+        binding.btnDownload.isEnabled = false
+        binding.btnDownload.alpha = 0.5f
         binding.btnDownload.setOnClickListener { startDownload() }
         updatePathRow()
         binding.tvDlgRename.setOnClickListener { showRenameDialog() }
@@ -140,7 +144,27 @@ class DownloadDialogFragment : DialogFragment() {
             requireContext().getSharedPreferences("phoenix_downloads", android.content.Context.MODE_PRIVATE)
                 .edit().putString("custom_dir_path", real).apply()
             updatePathRow()
-            Toast.makeText(requireContext(), "Save to: $real", Toast.LENGTH_SHORT).show()
+            // Android 11+: raw-path writes to shared folders need the
+            // all-files-access grant — send the user to the settings page.
+            if (android.os.Build.VERSION.SDK_INT >= 30 &&
+                !android.os.Environment.isExternalStorageManager()
+            ) {
+                Toast.makeText(
+                    requireContext(),
+                    "Allow \"All files access\" so downloads can save to that folder",
+                    Toast.LENGTH_LONG
+                ).show()
+                try {
+                    startActivity(
+                        android.content.Intent(
+                            android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                            android.net.Uri.parse("package:" + requireContext().packageName)
+                        )
+                    )
+                } catch (e: Exception) { /* engine falls back safely */ }
+            } else {
+                Toast.makeText(requireContext(), "Save to: $real", Toast.LENGTH_SHORT).show()
+            }
         } else {
             Toast.makeText(
                 requireContext(),
@@ -187,6 +211,8 @@ class DownloadDialogFragment : DialogFragment() {
                     selectedFormatId = entry.info.id
                     selectedHeight = entry.height
                     selectedContainer = entry.container
+                    binding.btnDownload.isEnabled = true
+                    binding.btnDownload.alpha = 1f
                 }
                 val glm = GridLayoutManager(requireContext(), 2)
                 glm.spanSizeLookup = FormatListAdapter.spanSizeLookup(adapter)
@@ -199,6 +225,8 @@ class DownloadDialogFragment : DialogFragment() {
                     selectedFormatId = first.info.id
                     selectedHeight = first.height
                     selectedContainer = first.container
+                    binding.btnDownload.isEnabled = true
+                    binding.btnDownload.alpha = 1f
                 }
             }.onFailure {
                 Toast.makeText(requireContext(), "Failed: ${it.message}", Toast.LENGTH_SHORT).show()

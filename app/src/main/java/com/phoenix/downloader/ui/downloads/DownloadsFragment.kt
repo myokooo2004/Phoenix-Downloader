@@ -137,9 +137,10 @@ class DownloadsFragment : Fragment() {
         private fun bindActive(holder: ActiveVH, item: DownloadItem) {
             holder.title.text = item.title
             if (item.thumbnail.isNotEmpty()) {
-                Glide.with(holder.itemView).load(item.thumbnail).into(holder.thumb)
+                Glide.with(holder.itemView).load(item.thumbnail)
+                    .error(android.R.drawable.ic_media_play).into(holder.thumb)
             } else {
-                holder.thumb.setImageDrawable(null)
+                holder.thumb.setImageResource(android.R.drawable.ic_media_play)
             }
             holder.progress.isIndeterminate = item.status == DownloadItem.Status.QUEUED
             holder.progress.progress = item.progress
@@ -190,9 +191,11 @@ class DownloadsFragment : Fragment() {
             val item = row.item
             holder.name.text = item?.title ?: file.nameWithoutExtension
             if (item != null && item.thumbnail.isNotEmpty()) {
-                Glide.with(holder.itemView).load(item.thumbnail).into(holder.thumb)
+                Glide.with(holder.itemView).load(item.thumbnail)
+                    .error(android.R.drawable.ic_media_play).into(holder.thumb)
             } else if (!file.extension.equals("mp3", ignoreCase = true)) {
-                Glide.with(holder.itemView).load(file).into(holder.thumb)
+                Glide.with(holder.itemView).load(file)
+                    .error(android.R.drawable.ic_media_play).into(holder.thumb)
             } else {
                 holder.thumb.setImageResource(android.R.drawable.ic_media_play)
             }

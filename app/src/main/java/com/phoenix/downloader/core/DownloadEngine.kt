@@ -61,11 +61,19 @@ object DownloadEngine {
 
     fun downloadDir(context: Context): File {
         // User-chosen folder (dialog "Change", persisted) wins when usable.
+        // Android 11+ blocks raw-path writes to shared storage without
+        // all-files access, so PROBE writability — an unusable custom
+        // folder must fall back to the default, never fail a download.
         val custom = context.getSharedPreferences("phoenix_downloads", Context.MODE_PRIVATE)
             .getString("custom_dir_path", null)
         if (!custom.isNullOrEmpty()) {
             val dir = File(custom)
-            if (dir.exists() || dir.mkdirs()) return dir
+            val usable = try {
+                if (!dir.exists()) dir.mkdirs()
+                val probe = File(dir, ".probe")
+                probe.createNewFile() && probe.delete()
+            } catch (e: Exception) { false }
+            if (usable) return dir
         }
         return context.getExternalFilesDir(null) ?: context.filesDir
     }
