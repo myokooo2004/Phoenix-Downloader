@@ -49,6 +49,11 @@ object YtDlpManager {
             updateChecked = true
             initError = null
             logNote("YtDlpManager.version", "yt-dlp version after init: ${getYtDlpVersion()}")
+            // One-time environment diagnostic: proves the bundled Python version
+            // and whether the QuickJS runtime is active. Output goes to crash.log.
+            CoroutineScope(Dispatchers.IO).launch {
+                runVerboseDiagnostic()
+            }
             if (AUTO_UPDATE) {
                 CoroutineScope(Dispatchers.IO).launch {
                     val r = checkForUpdates()
@@ -66,6 +71,58 @@ object YtDlpManager {
     }
 
     fun isInitialized(): Boolean = initialized
+
+    /**
+     * Runs yt-dlp --verbose once and logs the debug header lines that state the
+     * Python version and the JS runtimes in use, plus any qjs/python files found
+     * in the native lib dir. Pure diagnostics — result lands in crash.log.
+     */
+    private suspend fun runVerboseDiagnostic() {
+        try {
+            val ctx = appContext ?: return
+            val nativeDir = ctx.applicationInfo.nativeLibraryDir ?: ""
+            val libs = try {
+                java.io.File(nativeDir).listFiles()
+                    ?.map { it.name }
+                    ?.filter { it.contains("qjs") || it.contains("python") }
+                    ?.joinToString(", ") ?: "none"
+            } catch (e: Exception) {
+                "list failed: ${e.message}"
+            }
+            logNote("YtDlpDiag.libs", "nativeLibDir=$nativeDir libs=[$libs]")
+
+            val req = YoutubeDLRequest("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+            req.addOption("--verbose")
+            req.addOption("--simulate")
+            req.addOption("--no-download")
+            var text = ""
+            try {
+                val resp = YoutubeDL.getInstance().execute(req)
+                text = (resp.out ?: "") + "\n" + (resp.err ?: "")
+            } catch (e: Exception) {
+                // yt-dlp writes the debug header to stderr before failing;
+                // the library folds stderr into the exception message.
+                text = e.message ?: ""
+            }
+            val interesting = text.lineSequence()
+                .map { it.trim() }
+                .filter {
+                    it.contains("Python", ignoreCase = true) ||
+                        it.contains("JS runtime", ignoreCase = true) ||
+                        it.contains("js-runtimes", ignoreCase = true) ||
+                        it.contains("quickjs", ignoreCase = true) ||
+                        it.contains("yt-dlp version", ignoreCase = true)
+                }
+                .take(12)
+                .joinToString(" | ")
+            logNote(
+                "YtDlpDiag.verbose",
+                if (interesting.isNotEmpty()) interesting else "no debug lines captured; raw head: ${text.take(400)}"
+            )
+        } catch (e: Exception) {
+            logFailure("YtDlpDiag", e)
+        }
+    }
 
     fun getInitError(): Throwable? = initError
 
