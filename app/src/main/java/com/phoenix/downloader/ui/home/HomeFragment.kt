@@ -73,6 +73,18 @@ class HomeFragment : Fragment() {
             }
         })
 
+        // Instant first paint (user: home videos appear too slowly):
+        // render the disk-cached trending list from the last session, or
+        // the bundled snapshot on first install. loadTrendingData() then
+        // refreshes from the network in the background.
+        if (videoList.isEmpty()) {
+            videoList.addAll(
+                com.phoenix.downloader.core.TrendingCache.load(requireContext())
+                    .ifEmpty { loadBundledTrending() }
+            )
+            if (videoList.isNotEmpty()) ensureAdapter()
+        }
+
         loadTrendingData()
         
         binding.etSearch.setOnEditorActionListener { _, actionId, _ ->
@@ -129,33 +141,42 @@ class HomeFragment : Fragment() {
         }
     }
 
+    private fun ensureAdapter() {
+        if (videoAdapter != null) return
+        videoAdapter = VideoAdapter(videoList,
+            onWatchClick = { video -> (activity as MainActivity).openVideoDetail(video.url, video.title, video.thumbnail, video.duration) },
+            onDownloadClick = { video -> DownloadDialogFragment.newInstance(video.url, video.title, video.thumbnail, video.duration).show(childFragmentManager, "DownloadDialog") }
+        )
+        binding.rvVideos.adapter = videoAdapter
+    }
+
     private fun loadTrendingData() {
         if (isLoading) return
         isLoading = true
         viewLifecycleOwner.lifecycleScope.launch {
-            // Try YouTube Data API first (real-time), fallback to bundled assets
+            // Background refresh: whatever is already on screen (disk
+            // cache or bundled snapshot) STAYS if the network fails.
             val result = YouTubeApiClient.getTrending("MM", 20, null)
             isLoading = false
             if (result.isSuccess) {
                 val (videos, token) = result.getOrNull() ?: Pair(emptyList(), null)
-                nextPageToken = token
-                videoList.clear()
-                videoList.addAll(videos)
-            } else {
-                // Fallback to bundled trending.json
-                videoList.clear()
+                if (videos.isNotEmpty()) {
+                    nextPageToken = token
+                    videoList.clear()
+                    videoList.addAll(videos)
+                    if (videoAdapter == null) ensureAdapter()
+                    else videoAdapter?.notifyDataSetChanged()
+                    context?.let { com.phoenix.downloader.core.TrendingCache.save(it, videoList) }
+                    return@launch
+                }
+            }
+            if (videoList.isEmpty()) {
                 videoList.addAll(loadBundledTrending())
-                nextPageToken = null
+                if (videoList.isNotEmpty()) ensureAdapter()
             }
             if (videoList.isEmpty()) {
                 Toast.makeText(requireContext(), "Data မရပါ", Toast.LENGTH_SHORT).show()
-                return@launch
             }
-            videoAdapter = VideoAdapter(videoList,
-                onWatchClick = { video -> (activity as MainActivity).openVideoDetail(video.url, video.title, video.thumbnail, video.duration) },
-                onDownloadClick = { video -> DownloadDialogFragment.newInstance(video.url, video.title, video.thumbnail, video.duration).show(childFragmentManager, "DownloadDialog") }
-            )
-            binding.rvVideos.adapter = videoAdapter
         }
     }
 
@@ -169,9 +190,14 @@ class HomeFragment : Fragment() {
             if (result.isSuccess) {
                 val (videos, newToken) = result.getOrNull() ?: Pair(emptyList(), null)
                 nextPageToken = newToken
+                val seen = videoList.map { it.url }.toHashSet()
+                val fresh = videos.filter { it.url !in seen }
                 val startPos = videoList.size
-                videoList.addAll(videos)
-                videoAdapter?.notifyItemRangeInserted(startPos, videos.size)
+                videoList.addAll(fresh)
+                if (fresh.isNotEmpty()) {
+                    videoAdapter?.notifyItemRangeInserted(startPos, fresh.size)
+                    context?.let { com.phoenix.downloader.core.TrendingCache.save(it, videoList) }
+                }
             }
         }
     }

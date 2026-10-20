@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Brand-style site tile (user spec 2026-10-20): blue rounded square with
+     the white f mark, replacing the plain circle + glyph text. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    <path
+        android:fillColor="#1877F2"
+        android:pathData="M13,2 h22 a11,11 0 0 1 11,11 v22 a11,11 0 0 1 -11,11 H13 a11,11 0 0 1 -11,-11 V13 a11,11 0 0 1 11,-11 z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M26.5,39.2 V26.6 H22.7 V22.3 H26.5 V19.15 C26.5,15.15 28.7,12.3 33.05,12.3 L36.95,12.3 V16.65 L34.35,16.65 C32.12,16.65 31.5,17.55 31.5,19.4 V22.3 H36.15 L35.6,26.6 H31.5 V39.2 Z" />
+</vector>

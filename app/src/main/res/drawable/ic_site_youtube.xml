@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Brand-style site tile (user spec 2026-10-20): red rounded square with
+     the white play badge, replacing the plain circle + glyph text. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    <path
+        android:fillColor="#FF0000"
+        android:pathData="M13,2 h22 a11,11 0 0 1 11,11 v22 a11,11 0 0 1 -11,11 H13 a11,11 0 0 1 -11,-11 V13 a11,11 0 0 1 11,-11 z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M15.5,15 h17 a4.5,4.5 0 0 1 4.5,4.5 v9 a4.5,4.5 0 0 1 -4.5,4.5 h-17 a4.5,4.5 0 0 1 -4.5,-4.5 v-9 a4.5,4.5 0 0 1 4.5,-4.5 z" />
+    <path
+        android:fillColor="#FF0000"
+        android:pathData="M21,19.8 L28.6,24 L21,28.2 Z" />
+</vector>

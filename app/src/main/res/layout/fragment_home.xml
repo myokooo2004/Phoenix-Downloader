@@ -62,14 +62,11 @@
             android:orientation="vertical"
             android:padding="8dp">
 
-            <TextView
+            <ImageView
                 android:layout_width="48dp"
                 android:layout_height="48dp"
-                android:background="@drawable/bg_site_youtube"
-                android:gravity="center"
-                android:text="▶"
-                android:textColor="#FFFFFF"
-                android:textSize="20sp" />
+                android:contentDescription="Youtube"
+                android:src="@drawable/ic_site_youtube" />
 
             <TextView
                 android:layout_width="wrap_content"
@@ -88,14 +85,11 @@
             android:orientation="vertical"
             android:padding="8dp">
 
-            <TextView
+            <ImageView
                 android:layout_width="48dp"
                 android:layout_height="48dp"
-                android:background="@drawable/bg_site_facebook"
-                android:gravity="center"
-                android:text="f"
-                android:textColor="#FFFFFF"
-                android:textSize="20sp" />
+                android:contentDescription="Facebook"
+                android:src="@drawable/ic_site_facebook" />
 
             <TextView
                 android:layout_width="wrap_content"
@@ -114,14 +108,11 @@
             android:orientation="vertical"
             android:padding="8dp">
 
-            <TextView
+            <ImageView
                 android:layout_width="48dp"
                 android:layout_height="48dp"
-                android:background="@drawable/bg_site_tiktok"
-                android:gravity="center"
-                android:text="♪"
-                android:textColor="#FFFFFF"
-                android:textSize="20sp" />
+                android:contentDescription="TikTok"
+                android:src="@drawable/ic_site_tiktok" />
 
             <TextView
                 android:layout_width="wrap_content"
