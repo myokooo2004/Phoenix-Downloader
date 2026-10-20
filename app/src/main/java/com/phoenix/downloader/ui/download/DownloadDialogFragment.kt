@@ -59,12 +59,18 @@ class DownloadDialogFragment : BottomSheetDialogFragment() {
             val result = YtDlpManager.fetchFormats(videoUrl)
             binding.tvFetching.visibility = View.GONE
             result.onSuccess { formatsResult ->
-                val videoList = formatsResult.video.map {
-                    FormatInfo(it.id, "${it.label} (${it.format})", it.sizeLabel, false)
+                val videoList = mutableListOf<FormatInfo>()
+                // For each MP4-sourced video quality, offer MP4 and MKV containers.
+                // WEBM sources excluded (user does not want WEBM).
+                for (f in formatsResult.video.filter { it.format == "MP4" }) {
+                    videoList.add(FormatInfo(f.id, "${f.label} (MP4)", f.sizeLabel, false))
+                    videoList.add(FormatInfo("${f.id}|MKV", "${f.label} (MKV)", f.sizeLabel, false))
                 }
-                val audioList = formatsResult.music.map {
-                    FormatInfo(it.id, "${it.label} (${it.format})", it.sizeLabel, true)
-                }
+                val audioList = mutableListOf<FormatInfo>()
+                // MP3 only (user does not want WEBM/M4A raw formats)
+                audioList.add(FormatInfo("MP3_128", "128K (MP3)", "~3MB", true))
+                audioList.add(FormatInfo("MP3_192", "192K (MP3)", "~5MB", true))
+                audioList.add(FormatInfo("MP3_320", "320K (MP3)", "~8MB", true))
 
                 if (videoList.isNotEmpty()) {
                     binding.layoutVideoSection.visibility = View.VISIBLE

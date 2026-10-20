@@ -29,15 +29,27 @@ class DownloadService : Service() {
                 val outputTemplate = "$outputDir/$safeTitle.%(ext)s"
 
                 val request = YoutubeDLRequest(url)
-                // For video formats, merge with best audio using ffmpeg
-                // Format: "<videoId>+bestaudio/best" ensures audio is included
-                val formatSelector = if (formatId != "best" && !formatId.contains("+")) {
-                    "$formatId+bestaudio/best"
+                if (formatId.startsWith("MP3_")) {
+                    // MP3 extraction via ffmpeg
+                    val kbps = formatId.removePrefix("MP3_")
+                    request.addOption("-f", "bestaudio/best")
+                    request.addOption("--extract-audio")
+                    request.addOption("--audio-format", "mp3")
+                    request.addOption("--audio-quality", kbps)
                 } else {
-                    formatId
+                    // Video: check for MKV container request (formatId|MKV)
+                    val isMkv = formatId.endsWith("|MKV")
+                    val baseFormatId = formatId.removeSuffix("|MKV")
+                    // For video formats, merge with best audio using ffmpeg
+                    // Format: "<videoId>+bestaudio/best" ensures audio is included
+                    val formatSelector = if (baseFormatId != "best" && !baseFormatId.contains("+")) {
+                        "$baseFormatId+bestaudio/best"
+                    } else {
+                        baseFormatId
+                    }
+                    request.addOption("-f", formatSelector)
+                    request.addOption("--merge-output-format", if (isMkv) "mkv" else "mp4")
                 }
-                request.addOption("-f", formatSelector)
-                request.addOption("--merge-output-format", "mp4")
                 // Use aria2c for multi-connection faster downloads (4 connections to avoid blocks)
                 request.addOption("--external-downloader", "aria2c")
                 request.addOption("--external-downloader-args", "aria2c:-x 4 -s 4 -k 1M")
