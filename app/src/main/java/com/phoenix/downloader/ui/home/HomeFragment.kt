@@ -58,9 +58,20 @@ class HomeFragment : Fragment() {
         
         binding.etSearch.setOnEditorActionListener { _, actionId, _ ->
             if (actionId == EditorInfo.IME_ACTION_SEARCH || actionId == EditorInfo.IME_ACTION_DONE) {
-                val url = binding.etSearch.text.toString().trim()
-                if (url.isNotEmpty()) {
-                    DownloadDialogFragment.newInstance(url, "Download").show(childFragmentManager, "DownloadDialog")
+                val text = binding.etSearch.text.toString().trim()
+                if (text.isNotEmpty()) {
+                    val looksLikeUrl = text.startsWith("http://") || text.startsWith("https://") ||
+                        text.contains("youtube.com") || text.contains("youtu.be") ||
+                        text.contains("facebook.com") || text.contains("fb.watch") ||
+                        text.contains("tiktok.com")
+                    if (looksLikeUrl) {
+                        // Pasted link -> download dialog (existing URL flow)
+                        val url = if (text.startsWith("http")) text else "https://$text"
+                        DownloadDialogFragment.newInstance(url, "Download").show(childFragmentManager, "DownloadDialog")
+                    } else {
+                        // Plain text -> search results screen
+                        (activity as? MainActivity)?.openSearch(text)
+                    }
                     binding.etSearch.setText("")
                 }
                 true

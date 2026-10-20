@@ -236,42 +236,34 @@ object YtDlpManager {
     /**
      * Step 2: list downloadable formats, split into music and video.
      *
-     * Client chain: tv first (token-free, downloadable formats), then the
-     * default set (richest lists — up to 4K — but its URLs can be SABR-gated;
-     * DownloadService's retry matrix covers that), then web_safari when the
-     * best so far is below 1080p. Keeps whichever attempt is richest, so 4K
-     * shows whenever the video has it.
+     * Speed: ONE extraction with the default client normally suffices
+     * (yt-dlp 2026.08.19's solver is current). The tv / web_safari clients
+     * are only tried if the default attempt throws or returns nothing —
+     * the old always-try-everyone chain cost up to 3x the wait.
+     *
+     * The video list is collapsed to ONE format per quality tier
+     * (360/480/720/1080/1440/4K...): the best at each height, MP4 sources
+     * preferred (user rule 2026-10-20).
      */
     suspend fun fetchFormats(url: String): Result<FormatsResult> = withContext(Dispatchers.IO) {
         try {
             if (!isReady()) return@withContext Result.failure(Exception(notReadyReason()))
             ensureUpdated()
-            // Order matters: try "tv" first — its formats are token-free and
-            // actually DOWNLOAD (the default/web client's listed URLs are
-            // SABR/PO-token gated and die with HTTP 403 in DownloadService,
-            // field-proven build 246). Fall back to the default set (richest
-            // lists, up to 4K), then web_safari if still below 1080p.
-            val clients = listOf<String?>("tv", null, "web_safari")
-            var best: FormatsResult? = null
-            for ((index, client) in clients.withIndex()) {
-                if (index == 2 && (best?.maxHeight ?: 0) >= 1080) break
-                val attempt = try {
-                    fetchFormatsOnce(url, client)
+            val clients = listOf<String?>(null, "tv", "web_safari")
+            var lastError: Exception? = null
+            for (client in clients) {
+                try {
+                    val attempt = fetchFormatsOnce(url, client)
+                    if (attempt.video.isNotEmpty() || attempt.music.isNotEmpty()) {
+                        return@withContext Result.success(attempt)
+                    }
+                    lastError = Exception("client=${client ?: "default"} returned no formats")
                 } catch (e: Exception) {
+                    lastError = e
                     logNote("fetchFormats.attempt", "client=${client ?: "default"} failed: ${e.message}")
-                    null
-                } ?: continue
-                val current = best
-                if (current == null ||
-                    attempt.maxHeight > current.maxHeight ||
-                    (attempt.maxHeight == current.maxHeight && attempt.video.size > current.video.size)
-                ) {
-                    best = attempt
                 }
-                if ((best?.maxHeight ?: 0) >= 2160) break
             }
-            val winner = best ?: return@withContext Result.failure(Exception("No formats found"))
-            Result.success(winner)
+            Result.failure(lastError ?: Exception("No formats found"))
         } catch (e: Exception) {
             logFailure("fetchFormats", e)
             Result.failure(e)
@@ -290,7 +282,10 @@ object YtDlpManager {
             val json = org.json.JSONObject(response.out)
 
             val music = mutableListOf<FormatOption>()
-            val video = mutableListOf<FormatOption>()
+            // ONE video format per quality tier (user rule): the best at each
+            // height, MP4 sources preferred, then the largest file.
+            val bestByHeight = mutableMapOf<Int, FormatOption>()
+            val bestSizeByHeight = mutableMapOf<Int, Long>()
             var maxHeight = 0
             val arr = json.optJSONArray("formats") ?: org.json.JSONArray()
 
@@ -315,20 +310,33 @@ object YtDlpManager {
                     else "Video"
                 }
 
+                val sizeBytes = f.optLong("filesize", 0).takeIf { it > 0 }
+                    ?: f.optLong("filesize_approx", 0)
                 val opt = FormatOption(
                     id = f.optString("format_id", ""),
                     label = label,
                     format = f.optString("ext", "").uppercase(),
-                    sizeLabel = formatBytes(
-                        f.optLong("filesize", 0).takeIf { it > 0 }
-                            ?: f.optLong("filesize_approx", 0)
-                    ),
+                    sizeLabel = formatBytes(sizeBytes),
                     isAudio = isAudioOnly
                 )
-                if (isAudioOnly) music.add(opt) else video.add(opt)
+                if (isAudioOnly) {
+                    music.add(opt)
+                } else {
+                    val cur = bestByHeight[height]
+                    val better = when {
+                        cur == null -> true
+                        opt.format == "MP4" && cur.format != "MP4" -> true
+                        opt.format != "MP4" && cur.format == "MP4" -> false
+                        else -> sizeBytes > (bestSizeByHeight[height] ?: -1L)
+                    }
+                    if (better) {
+                        bestByHeight[height] = opt
+                        bestSizeByHeight[height] = sizeBytes
+                    }
+                }
             }
 
-            val sortedVideo = video.sortedBy {
+            val sortedVideo = bestByHeight.values.sortedBy {
                 it.label.filter { c -> c.isDigit() }.toIntOrNull() ?: 0
             }
             val errText = response.err ?: ""

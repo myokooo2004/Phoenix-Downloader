@@ -125,6 +125,74 @@ object YouTubeApiClient {
     data class RelatedPage(val videos: List<VideoItem>, val nextPageToken: String?)
 
     /**
+     * Search YouTube videos via the Worker (/search -> search.list).
+     * Returns the page's videos plus the next page token (null = no more).
+     */
+    suspend fun searchVideos(
+        query: String,
+        maxResults: Int = 20,
+        pageToken: String? = null
+    ): Result<Pair<List<VideoItem>, String?>> = withContext(Dispatchers.IO) {
+        try {
+            var urlStr = "$WORKER_BASE/search" +
+                    "?q=${java.net.URLEncoder.encode(query, "UTF-8")}" +
+                    "&maxResults=${maxResults.coerceIn(1, 50)}"
+            if (!pageToken.isNullOrEmpty()) {
+                urlStr += "&pageToken=${java.net.URLEncoder.encode(pageToken, "UTF-8")}"
+            }
+            val url = URL(urlStr)
+            val conn = url.openConnection() as HttpURLConnection
+            conn.requestMethod = "GET"
+            conn.connectTimeout = 15000
+            conn.readTimeout = 15000
+
+            val code = conn.responseCode
+            if (code != 200) {
+                val errorBody = try { conn.errorStream?.bufferedReader()?.readText() ?: "" } catch (e: Exception) { "" }
+                Log.e(TAG, "searchVideos API error $code: $errorBody")
+                return@withContext Result.failure(Exception("YouTube API error: $code - $errorBody"))
+            }
+
+            val body = conn.inputStream.bufferedReader().readText()
+            val json = JSONObject(body)
+            val nextToken = json.optString("nextPageToken", "").ifEmpty { null }
+            val items = json.optJSONArray("items") ?: org.json.JSONArray()
+            val videos = mutableListOf<VideoItem>()
+            for (i in 0 until items.length()) {
+                try {
+                    val item = items.getJSONObject(i)
+                    val idObj = item.optJSONObject("id") ?: continue
+                    val id = idObj.optString("videoId", "")
+                    if (id.isEmpty()) continue
+                    val snippet = item.getJSONObject("snippet")
+                    val title = snippet.optString("title", "")
+                    val thumbnails = snippet.getJSONObject("thumbnails")
+                    val thumbObj = when {
+                        thumbnails.has("high") -> thumbnails.getJSONObject("high")
+                        thumbnails.has("medium") -> thumbnails.getJSONObject("medium")
+                        else -> thumbnails.getJSONObject("default")
+                    }
+                    videos.add(
+                        VideoItem(
+                            url = "https://www.youtube.com/watch?v=$id",
+                            title = title,
+                            thumbnail = thumbObj.getString("url"),
+                            duration = 0
+                        )
+                    )
+                } catch (e: Exception) {
+                    Log.w(TAG, "searchVideos: skipping bad item $i", e)
+                    continue
+                }
+            }
+            Result.success(videos to nextToken)
+        } catch (e: Exception) {
+            Log.e(TAG, "searchVideos failed", e)
+            Result.failure(e)
+        }
+    }
+
+    /**
      * Fetch one page of related videos (Worker /related -> search.list by
      * title; relatedToVideoId is deprecated). Pass [pageToken] from the
      * previous page for infinite scrolling.

@@ -20,11 +20,13 @@ class PlayerFragment : Fragment() {
     private var exoPlayer: ExoPlayer? = null
     private var videoUrl = ""
     private var videoTitle = ""
+    private var isLocal = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         videoUrl = arguments?.getString("URL") ?: ""
         videoTitle = arguments?.getString("TITLE") ?: ""
+        isLocal = arguments?.getBoolean("LOCAL", false) ?: false
     }
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
@@ -39,22 +41,35 @@ class PlayerFragment : Fragment() {
         exoPlayer = ExoPlayer.Builder(requireContext()).build()
         binding.playerView.player = exoPlayer
 
-        // A YouTube watch URL is a web page, not a media stream — ExoPlayer
-        // cannot play it directly. Resolve the direct stream URL via yt-dlp
-        // first (same engine the download flow uses).
-        Toast.makeText(requireContext(), "Loading video...", Toast.LENGTH_SHORT).show()
-        viewLifecycleOwner.lifecycleScope.launch {
-            val result = YtDlpManager.resolveStreamUrl(videoUrl)
-            result.onSuccess { streamUrl ->
-                if (!streamUrl.isNullOrEmpty()) {
-                    exoPlayer?.setMediaItem(MediaItem.fromUri(streamUrl))
-                    exoPlayer?.prepare()
-                    exoPlayer?.play()
-                } else {
-                    Toast.makeText(requireContext(), "Could not resolve video stream", Toast.LENGTH_LONG).show()
+        if (isLocal) {
+            // Downloaded file on the device — play it directly, no yt-dlp.
+            binding.btnPlayerDownload.visibility = View.GONE
+            val file = java.io.File(videoUrl)
+            if (file.exists()) {
+                exoPlayer?.setMediaItem(MediaItem.fromUri(android.net.Uri.fromFile(file)))
+                exoPlayer?.prepare()
+                exoPlayer?.play()
+            } else {
+                Toast.makeText(requireContext(), "File not found", Toast.LENGTH_LONG).show()
+            }
+        } else {
+            // A YouTube watch URL is a web page, not a media stream — ExoPlayer
+            // cannot play it directly. Resolve the direct stream URL via yt-dlp
+            // first (same engine the download flow uses).
+            Toast.makeText(requireContext(), "Loading video...", Toast.LENGTH_SHORT).show()
+            viewLifecycleOwner.lifecycleScope.launch {
+                val result = YtDlpManager.resolveStreamUrl(videoUrl)
+                result.onSuccess { streamUrl ->
+                    if (!streamUrl.isNullOrEmpty()) {
+                        exoPlayer?.setMediaItem(MediaItem.fromUri(streamUrl))
+                        exoPlayer?.prepare()
+                        exoPlayer?.play()
+                    } else {
+                        Toast.makeText(requireContext(), "Could not resolve video stream", Toast.LENGTH_LONG).show()
+                    }
+                }.onFailure { e ->
+                    Toast.makeText(requireContext(), "Play failed: ${e.message}", Toast.LENGTH_LONG).show()
                 }
-            }.onFailure { e ->
-                Toast.makeText(requireContext(), "Play failed: ${e.message}", Toast.LENGTH_LONG).show()
             }
         }
 
@@ -72,8 +87,12 @@ class PlayerFragment : Fragment() {
     }
 
     companion object {
-        fun newInstance(url: String, title: String) = PlayerFragment().apply {
-            arguments = Bundle().apply { putString("URL", url); putString("TITLE", title) }
+        fun newInstance(url: String, title: String, isLocal: Boolean = false) = PlayerFragment().apply {
+            arguments = Bundle().apply {
+                putString("URL", url)
+                putString("TITLE", title)
+                putBoolean("LOCAL", isLocal)
+            }
         }
     }
 }

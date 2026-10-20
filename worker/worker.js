@@ -95,6 +95,17 @@ async function handleRequest(request) {
     return ytFetch(api, 7200);
   }
 
+  if (path === "/search") {
+    const q = url.searchParams.get("q");
+    if (!q) return jsonError(400, "q required");
+    const maxResults = Math.min(parseInt(url.searchParams.get("maxResults") || "20", 10), 50);
+    const pageToken = url.searchParams.get("pageToken");
+    let api = `${YT_BASE}/search?part=snippet&q=${encodeURIComponent(q)}&type=video&maxResults=${maxResults}&key=${key}`;
+    if (pageToken) api += `&pageToken=${encodeURIComponent(pageToken)}`;
+    // Search results shift; short cache to save quota (10 min)
+    return ytFetch(api, 600);
+  }
+
   if (path === "/comments") {
     const videoId = url.searchParams.get("videoId");
     if (!videoId) return jsonError(400, "videoId required");

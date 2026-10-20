@@ -34,6 +34,10 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
+        // Download engine: reloads persisted records; unfinished downloads
+        // re-queue and resume automatically.
+        com.phoenix.downloader.core.DownloadEngine.init(this)
+
         requestPermissions()
         if (savedInstanceState == null) showHome()
 
@@ -86,6 +90,21 @@ class MainActivity : AppCompatActivity() {
     fun openBrowser(url: String) {
         supportFragmentManager.beginTransaction()
             .replace(R.id.nav_host, com.phoenix.downloader.ui.browser.BrowserFragment.newInstance(url))
+            .addToBackStack(null)
+            .commit()
+    }
+
+    fun openSearch(query: String) {
+        supportFragmentManager.beginTransaction()
+            .replace(R.id.nav_host, com.phoenix.downloader.ui.search.SearchFragment.newInstance(query))
+            .addToBackStack(null)
+            .commit()
+    }
+
+    /** Play a file already on the device (from My Files). */
+    fun openLocalPlayer(path: String, title: String) {
+        supportFragmentManager.beginTransaction()
+            .replace(R.id.nav_host, PlayerFragment.newInstance(path, title, isLocal = true))
             .addToBackStack(null)
             .commit()
     }

@@ -7,18 +7,19 @@
     android:elevation="2dp"
     android:gravity="center_vertical"
     android:orientation="horizontal"
-    android:padding="12dp">
+    android:padding="10dp">
 
     <ImageView
-        android:layout_width="40dp"
-        android:layout_height="40dp"
-        android:padding="8dp"
-        android:src="@android:drawable/ic_media_play" />
+        android:id="@+id/iv_file_thumb"
+        android:layout_width="104dp"
+        android:layout_height="58dp"
+        android:background="#3A3A3A"
+        android:scaleType="centerCrop" />
 
     <LinearLayout
         android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:layout_marginStart="12dp"
+        android:layout_marginStart="10dp"
         android:layout_weight="1"
         android:orientation="vertical">
 
@@ -27,15 +28,28 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:ellipsize="end"
-            android:maxLines="1"
+            android:maxLines="2"
             android:textColor="@color/text_primary"
+            android:textSize="13sp"
             android:textStyle="bold" />
 
         <TextView
             android:id="@+id/tv_file_meta"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:textColor="@color/text_secondary" />
+            android:layout_marginTop="3dp"
+            android:textColor="@color/text_secondary"
+            android:textSize="11sp" />
     </LinearLayout>
+
+    <TextView
+        android:id="@+id/btn_file_menu"
+        android:layout_width="38dp"
+        android:layout_height="38dp"
+        android:clickable="true"
+        android:focusable="true"
+        android:gravity="center"
+        android:text="⋮"
+        android:textColor="@color/text_secondary"
+        android:textSize="18sp" />
 </LinearLayout>

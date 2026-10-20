@@ -1,17 +1,14 @@
 package com.phoenix.downloader.ui.download
 
-import android.content.Intent
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
-import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.fragment.app.DialogFragment
 import com.bumptech.glide.Glide
-import com.phoenix.downloader.core.DownloadService
 import com.phoenix.downloader.core.YtDlpManager
 import com.phoenix.downloader.databinding.DialogDownloadBinding
 import kotlinx.coroutines.launch
@@ -100,15 +97,13 @@ class DownloadDialogFragment : DialogFragment() {
                     (f.label.filter { c -> c.isDigit() }.toIntOrNull() ?: 0) >= 360
                 }
                 val shownFormats = hdFormats.ifEmpty { formatsResult.video }
-                // Offer EVERY (360p+) video format yt-dlp returns (up to
-                // 4K/8K), each as an MP4 or MKV output container. The SOURCE
-                // may be WEBM/VP9 (the only form 4K comes in) — the file the
-                // user receives is still MP4/MKV via --merge-output-format.
+                // Video list arrives already collapsed to ONE format per
+                // quality tier (best, MP4 preferred) from YtDlpManager.
+                // User rule: MP4 output only — no MKV offers.
                 for (f in shownFormats) {
                     val height = f.label.filter { c -> c.isDigit() }.toIntOrNull() ?: 0
                     if (firstVideoEntryIndex < 0) firstVideoEntryIndex = rows.size
                     rows.add(FormatRow.Entry(FormatInfo(f.id, "${f.label} (MP4)", f.sizeLabel, false), height, "MP4"))
-                    rows.add(FormatRow.Entry(FormatInfo("${f.id}|MKV", "${f.label} (MKV)", f.sizeLabel, false), height, "MKV"))
                 }
                 if (formatsResult.video.isEmpty()) {
                     Toast.makeText(requireContext(), "No formats found", Toast.LENGTH_SHORT).show()
@@ -138,20 +133,32 @@ class DownloadDialogFragment : DialogFragment() {
     }
 
     private fun startDownload() {
-        val intent = Intent(requireContext(), DownloadService::class.java).apply {
-            putExtra("URL", videoUrl)
-            putExtra("TITLE", videoTitle)
-            putExtra("FORMAT_ID", selectedFormatId)
-            // Download with the same player_client that produced the format
-            // list (e.g. tv / web_safari when the default capped at 360p).
-            formatsClient?.let { putExtra("CLIENT", it) }
-            // For the service's retry matrix (403/SABR fallback across clients).
-            putExtra("HEIGHT", selectedHeight)
-            putExtra("CONTAINER", selectedContainer)
+        // Hand the download to the engine's queue (max 3 concurrent,
+        // pause/resume, survives restarts). The label is reconstructed from
+        // the current selection for the Downloads screen.
+        val formatLabel = when {
+            selectedFormatId.startsWith("MP3_") ->
+                "MP3 ${selectedFormatId.removePrefix("MP3_")}K"
+            selectedHeight >= 2160 -> "4K HD (MP4)"
+            selectedHeight > 0 -> "${selectedHeight}P (MP4)"
+            else -> "Video (MP4)"
         }
-        ContextCompat.startForegroundService(requireContext(), intent)
+        val item = com.phoenix.downloader.model.DownloadItem(
+            id = System.currentTimeMillis(),
+            title = videoTitle.ifEmpty { "Video" },
+            url = videoUrl,
+            formatLabel = formatLabel,
+            isAudio = selectedFormatId.startsWith("MP3"),
+            destPath = "",
+            thumbnail = videoThumbnail,
+            formatId = selectedFormatId,
+            client = formatsClient,
+            height = selectedHeight,
+            container = selectedContainer
+        )
+        com.phoenix.downloader.core.DownloadEngine.enqueue(requireContext(), item)
         dismiss()
-        Toast.makeText(requireContext(), "Download စတင်ပါပြီ", Toast.LENGTH_SHORT).show()
+        Toast.makeText(requireContext(), "Downloading: ${item.title}", Toast.LENGTH_SHORT).show()
     }
 
     override fun onDestroyView() {
