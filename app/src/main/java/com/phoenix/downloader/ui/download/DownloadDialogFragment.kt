@@ -9,14 +9,14 @@ import android.widget.Toast
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.GridLayoutManager
+import androidx.fragment.app.DialogFragment
 import com.bumptech.glide.Glide
-import com.google.android.material.bottomsheet.BottomSheetDialogFragment
 import com.phoenix.downloader.core.DownloadService
 import com.phoenix.downloader.core.YtDlpManager
 import com.phoenix.downloader.databinding.DialogDownloadBinding
 import kotlinx.coroutines.launch
 
-class DownloadDialogFragment : BottomSheetDialogFragment() {
+class DownloadDialogFragment : DialogFragment() {
     private var _binding: DialogDownloadBinding? = null
     private val binding get() = _binding!!
     private var videoUrl = ""
@@ -30,6 +30,12 @@ class DownloadDialogFragment : BottomSheetDialogFragment() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Plain dialog with a translucent theme: the WINDOW gets an exact
+        // size (see onStart) and our match_parent root fills it. (The
+        // BottomSheetDialog + wrap_content + weighted-ScrollView combination
+        // repeatedly clipped the content and hid the DOWNLOAD button in the
+        // field across builds 242-248, so the sheet machinery is gone.)
+        setStyle(STYLE_NORMAL, android.R.style.Theme_Translucent_NoTitleBar)
         videoUrl = arguments?.getString("URL") ?: ""
         videoTitle = arguments?.getString("TITLE") ?: ""
         videoThumbnail = arguments?.getString("THUMB") ?: ""
@@ -43,19 +49,18 @@ class DownloadDialogFragment : BottomSheetDialogFragment() {
 
     override fun onStart() {
         super.onStart()
-        // Give the sheet a FIXED height (92% of screen) and force it expanded.
-        // With wrap_content height, the weighted ScrollView measures at full
-        // content height and pushes the DOWNLOAD button off the visible sheet
-        // (field-observed: button invisible / list not scrollable).
-        val sheet = dialog?.findViewById<View>(
-            com.google.android.material.R.id.design_bottom_sheet
-        ) ?: return
-        val screenHeight = resources.displayMetrics.heightPixels
-        sheet.layoutParams.height = (screenHeight * 0.92).toInt()
-        sheet.requestLayout()
-        com.google.android.material.bottomsheet.BottomSheetBehavior.from(sheet).apply {
-            state = com.google.android.material.bottomsheet.BottomSheetBehavior.STATE_EXPANDED
-            skipCollapsed = true
+        // Exact window: full width, 92% of screen height, anchored to the
+        // bottom. Deterministic — no behavior/fitToContents re-measurement.
+        dialog?.window?.apply {
+            val h = (resources.displayMetrics.heightPixels * 0.92).toInt()
+            setLayout(
+                android.view.WindowManager.LayoutParams.MATCH_PARENT,
+                h
+            )
+            setGravity(android.view.Gravity.BOTTOM)
+            setBackgroundDrawableResource(android.R.color.transparent)
+            addFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+            attributes = attributes.apply { dimAmount = 0.5f }
         }
     }
 
@@ -89,11 +94,17 @@ class DownloadDialogFragment : BottomSheetDialogFragment() {
                 rows.add(FormatRow.Entry(FormatInfo("MP3_320", "320K (MP3)", "~8MB", true), 0, "MP3"))
                 rows.add(FormatRow.Section("🎬 " + getString(com.phoenix.downloader.R.string.section_video)))
                 var firstVideoEntryIndex = -1
-                // Offer EVERY video format yt-dlp returns (up to 4K/8K), each
-                // as an MP4 or MKV output container. The SOURCE may be WEBM/VP9
-                // (the only form 4K comes in) — the file the user receives is
-                // still MP4/MKV via --merge-output-format.
-                for (f in formatsResult.video) {
+                // User rule: no video options below 360p. If the video ONLY
+                // exists below 360p, show those rather than nothing.
+                val hdFormats = formatsResult.video.filter { f ->
+                    (f.label.filter { c -> c.isDigit() }.toIntOrNull() ?: 0) >= 360
+                }
+                val shownFormats = hdFormats.ifEmpty { formatsResult.video }
+                // Offer EVERY (360p+) video format yt-dlp returns (up to
+                // 4K/8K), each as an MP4 or MKV output container. The SOURCE
+                // may be WEBM/VP9 (the only form 4K comes in) — the file the
+                // user receives is still MP4/MKV via --merge-output-format.
+                for (f in shownFormats) {
                     val height = f.label.filter { c -> c.isDigit() }.toIntOrNull() ?: 0
                     if (firstVideoEntryIndex < 0) firstVideoEntryIndex = rows.size
                     rows.add(FormatRow.Entry(FormatInfo(f.id, "${f.label} (MP4)", f.sizeLabel, false), height, "MP4"))

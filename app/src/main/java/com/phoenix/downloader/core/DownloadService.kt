@@ -27,6 +27,9 @@ class DownloadService : Service() {
 
         CoroutineScope(Dispatchers.IO).launch {
             try {
+                // Make sure yt-dlp is the latest before downloading (user rule:
+                // never an old version — old solvers fail YouTube's n-challenge).
+                com.phoenix.downloader.core.YtDlpManager.ensureUpdated()
                 CrashLogger.logNonFatal(
                     this@DownloadService, "DownloadService",
                     Exception("start url=$url format=$formatId client=${client ?: "default"} title=$title")

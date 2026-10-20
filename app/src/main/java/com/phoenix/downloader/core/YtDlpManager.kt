@@ -9,6 +9,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 /**
@@ -17,8 +18,13 @@ import kotlinx.coroutines.withContext
  */
 object YtDlpManager {
 
-    /** Set to false to test with the library's bundled yt-dlp only. */
-    private const val AUTO_UPDATE = false
+    /**
+     * User rule (standing): NEVER run an old yt-dlp — always update to the
+     * latest stable at startup. The bundled 2025.11.12's JS-challenge solver
+     * can no longer solve YouTube's current player ("found 0 n function
+     * possibilities" -> formats missing / HTTP 403), so this stays ON.
+     */
+    private const val AUTO_UPDATE = true
 
     private var initialized = false
     private var updateChecked = false
@@ -49,19 +55,16 @@ object YtDlpManager {
             updateChecked = true
             initError = null
             logNote("YtDlpManager.version", "yt-dlp version after init: ${getYtDlpVersion()}")
-            // One-time environment diagnostic: proves the bundled Python version
-            // and whether the QuickJS runtime is active. Output goes to crash.log.
-            CoroutineScope(Dispatchers.IO).launch {
-                runVerboseDiagnostic()
-            }
             if (AUTO_UPDATE) {
                 CoroutineScope(Dispatchers.IO).launch {
-                    val r = checkForUpdates()
-                    logNote(
-                        "YtDlpManager.update",
-                        "update installed=${r.getOrNull()} error=${r.exceptionOrNull()?.message} " +
-                            "version now: ${getYtDlpVersion()}"
-                    )
+                    // Update FIRST, then diagnose, so the verbose log shows the
+                    // version that will actually serve fetches/downloads.
+                    ensureUpdated()
+                    runVerboseDiagnostic()
+                }
+            } else {
+                CoroutineScope(Dispatchers.IO).launch {
+                    runVerboseDiagnostic()
                 }
             }
         } catch (e: Exception) {
@@ -208,6 +211,7 @@ object YtDlpManager {
     suspend fun fetchFormats(url: String): Result<FormatsResult> = withContext(Dispatchers.IO) {
         try {
             if (!isReady()) return@withContext Result.failure(Exception(notReadyReason()))
+            ensureUpdated()
             // Order matters: try "tv" first — its formats are token-free and
             // actually DOWNLOAD (the default/web client's listed URLs are
             // SABR/PO-token gated and die with HTTP 403 in DownloadService,
@@ -322,6 +326,7 @@ object YtDlpManager {
     suspend fun resolveStreamUrl(url: String): Result<String?> = withContext(Dispatchers.IO) {
         try {
             if (!isReady()) return@withContext Result.failure(Exception(notReadyReason()))
+            ensureUpdated()
             val request = baseRequest(url)
             request.addOption("-g")
             request.addOption("-f", "b[ext=mp4]/b")
@@ -335,6 +340,36 @@ object YtDlpManager {
     }
 
     /** Update yt-dlp from the STABLE channel. Returns true if an update was installed. */
+    private val updateMutex = kotlinx.coroutines.sync.Mutex()
+
+    @Volatile
+    private var updateDone = false
+
+    /**
+     * Runs the yt-dlp self-update at most once per process, serialized.
+     * Called from init (background) and awaited at the top of fetch/resolve
+     * so the first extraction of a session already uses the latest yt-dlp.
+     * A slow network never wedges a fetch: after 120s it proceeds with the
+     * currently installed version and retries on the next call.
+     */
+    suspend fun ensureUpdated() {
+        if (updateDone) return
+        updateMutex.withLock {
+            if (updateDone) return
+            val r = kotlinx.coroutines.withTimeoutOrNull(120_000) { checkForUpdates() }
+            if (r != null) {
+                logNote(
+                    "YtDlpManager.update",
+                    "installed=${r.getOrNull()} error=${r.exceptionOrNull()?.message} " +
+                        "version now: ${getYtDlpVersion()}"
+                )
+                updateDone = true
+            } else {
+                logNote("YtDlpManager.update", "update timed out (120s) — proceeding with installed version")
+            }
+        }
+    }
+
     suspend fun checkForUpdates(): Result<Boolean> = withContext(Dispatchers.IO) {
         try {
             val ctx = appContext ?: return@withContext Result.failure(Exception("Not initialized"))
@@ -364,7 +399,11 @@ object YtDlpManager {
     fun getYtDlpVersion(): String {
         return try {
             val ctx = appContext ?: return "unknown"
-            YoutubeDL.getInstance().version(ctx) ?: "unknown"
+            // versionName holds the release name set by the self-updater
+            // (null until the first successful update).
+            YoutubeDL.getInstance().versionName(ctx)
+                ?: YoutubeDL.getInstance().version(ctx)
+                ?: "unknown"
         } catch (e: Exception) {
             "unknown"
         }
