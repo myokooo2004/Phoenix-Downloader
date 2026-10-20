@@ -42,6 +42,48 @@ object YtDlpManager {
     /** Set when init() throws; the real reason fetches fail. */
     private var initError: Throwable? = null
 
+    // ---- Format cache + pre-warm ----
+    // On-device extraction takes seconds (Python start + JS challenge +
+    // network round trips). Server-side extractors feel instant because
+    // the list is ready before the tap. Our counter: start the fetch when
+    // the user lands on a detail page or a browser watch page, and cache
+    // the result, so the download dialog opens with the list already there.
+    private data class CachedFormats(val result: FormatsResult, val atMs: Long)
+
+    private const val FORMATS_CACHE_TTL_MS = 10 * 60 * 1000L
+    private val formatsCache = object : LinkedHashMap<String, CachedFormats>(8, 0.75f, true) {
+        override fun removeEldestEntry(
+            eldest: MutableMap.MutableEntry<String, CachedFormats>
+        ): Boolean = size > 8
+    }
+    private val formatsInFlight = HashSet<String>()
+    private val managerScope =
+        CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.IO)
+
+    private fun cachedFormats(url: String): FormatsResult? = synchronized(formatsCache) {
+        val hit = formatsCache[url] ?: return null
+        if (System.currentTimeMillis() - hit.atMs > FORMATS_CACHE_TTL_MS) {
+            formatsCache.remove(url)
+            null
+        } else {
+            hit.result
+        }
+    }
+
+    /** Fire-and-forget: fetch formats into the cache in the background. */
+    fun prewarmFormats(url: String) {
+        if (url.isEmpty() || cachedFormats(url) != null) return
+        val started = synchronized(formatsInFlight) { formatsInFlight.add(url) }
+        if (!started) return
+        managerScope.launch {
+            try {
+                fetchFormats(url)
+            } finally {
+                synchronized(formatsInFlight) { formatsInFlight.remove(url) }
+            }
+        }
+    }
+
     fun init(context: Context) {
         if (initialized) return
         try {
@@ -246,6 +288,10 @@ object YtDlpManager {
      * preferred (user rule 2026-10-20).
      */
     suspend fun fetchFormats(url: String): Result<FormatsResult> = withContext(Dispatchers.IO) {
+        cachedFormats(url)?.let {
+            logNote("fetchFormats.cache", "hit url=$url")
+            return@withContext Result.success(it)
+        }
         try {
             if (!isReady()) return@withContext Result.failure(Exception(notReadyReason()))
             ensureUpdated()
@@ -255,6 +301,10 @@ object YtDlpManager {
                 try {
                     val attempt = fetchFormatsOnce(url, client)
                     if (attempt.video.isNotEmpty() || attempt.music.isNotEmpty()) {
+                        synchronized(formatsCache) {
+                            formatsCache[url] =
+                                CachedFormats(attempt, System.currentTimeMillis())
+                        }
                         return@withContext Result.success(attempt)
                     }
                     lastError = Exception("client=${client ?: "default"} returned no formats")

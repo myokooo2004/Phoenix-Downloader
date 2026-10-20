@@ -61,6 +61,9 @@ class VideoDetailFragment : Fragment() {
         binding.tvDetailTitle.text = videoTitle.ifEmpty { videoUrl }
         binding.tvDetailChannel.text = extractChannelHint(videoUrl)
 
+        // Pre-warm the format list so the download dialog opens instantly.
+        YtDlpManager.prewarmFormats(videoUrl)
+
         // Auto-play video embedded
         setupPlayer()
 

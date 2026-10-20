@@ -154,6 +154,8 @@ class BrowserFragment : Fragment() {
         // FAB disabled - user wants per-video buttons only, not FAB
         binding.fabDownload.isVisible = false
         binding.tvDetectHint.isVisible = pendingVideoUrl != null
+        // Pre-warm formats for the detected watch page (dialog opens fast).
+        if (pendingVideoUrl != null) YtDlpManager.prewarmFormats(url)
     }
 
     /** Inject a small download icon into each video item (user style). */
