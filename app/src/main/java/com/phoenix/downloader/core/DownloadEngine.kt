@@ -59,8 +59,16 @@ object DownloadEngine {
         ensureService()
     }
 
-    fun downloadDir(context: Context): File =
-        context.getExternalFilesDir(null) ?: context.filesDir
+    fun downloadDir(context: Context): File {
+        // User-chosen folder (dialog "Change", persisted) wins when usable.
+        val custom = context.getSharedPreferences("phoenix_downloads", Context.MODE_PRIVATE)
+            .getString("custom_dir_path", null)
+        if (!custom.isNullOrEmpty()) {
+            val dir = File(custom)
+            if (dir.exists() || dir.mkdirs()) return dir
+        }
+        return context.getExternalFilesDir(null) ?: context.filesDir
+    }
 
     @Synchronized
     fun enqueue(context: Context, item: DownloadItem) {
@@ -237,7 +245,14 @@ object DownloadEngine {
                         item.status = DownloadItem.Status.DONE
                         CrashLogger.logNonFatal(ctx, "DownloadEngine.done",
                             Exception("id=${item.id} file=${clean.name} size=${clean.length()}"))
-                        copyToPublicDownloads(ctx, clean)
+                        // Copy to the public folder only for the default
+                        // location — a user-chosen folder already IS the
+                        // final destination.
+                        if (File(item.destPath).absolutePath ==
+                            (ctx.getExternalFilesDir(null) ?: ctx.filesDir).absolutePath
+                        ) {
+                            copyToPublicDownloads(ctx, clean)
+                        }
                     } else {
                         item.status = DownloadItem.Status.FAILED
                         item.errorMessage = "No output file produced"

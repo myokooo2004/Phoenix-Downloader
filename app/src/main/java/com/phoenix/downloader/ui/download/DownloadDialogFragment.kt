@@ -24,6 +24,13 @@ class DownloadDialogFragment : DialogFragment() {
     private var selectedHeight = 0
     private var selectedContainer = "MP4"
     private var formatsClient: String? = null
+    private var displayTitle = ""
+
+    private val folderPicker = registerForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        if (uri != null) onFolderPicked(uri)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -35,6 +42,7 @@ class DownloadDialogFragment : DialogFragment() {
         setStyle(STYLE_NORMAL, android.R.style.Theme_Translucent_NoTitleBar)
         videoUrl = arguments?.getString("URL") ?: ""
         videoTitle = arguments?.getString("TITLE") ?: ""
+        displayTitle = videoTitle
         videoThumbnail = arguments?.getString("THUMB") ?: ""
         videoDuration = arguments?.getInt("DURATION") ?: 0
     }
@@ -74,6 +82,72 @@ class DownloadDialogFragment : DialogFragment() {
         }
         fetchFormats()
         binding.btnDownload.setOnClickListener { startDownload() }
+        updatePathRow()
+        binding.tvDlgRename.setOnClickListener { showRenameDialog() }
+        binding.tvDlgChange.setOnClickListener { folderPicker.launch(null) }
+    }
+
+    /** Rename: edit the display/file name before downloading. */
+    private fun showRenameDialog() {
+        val input = android.widget.EditText(requireContext()).apply {
+            setText(displayTitle)
+            setSelection(text.length)
+        }
+        android.app.AlertDialog.Builder(requireContext())
+            .setTitle("Rename")
+            .setView(input)
+            .setPositiveButton("OK") { _, _ ->
+                val name = input.text.toString().trim()
+                if (name.isNotEmpty()) {
+                    displayTitle = name
+                    binding.tvDlgTitle.text = name
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    /** Path row: real destination + real free/total storage. */
+    private fun updatePathRow() {
+        val ctx = requireContext()
+        val custom = ctx.getSharedPreferences("phoenix_downloads", android.content.Context.MODE_PRIVATE)
+            .getString("custom_dir_path", null)
+        binding.tvDlgPath.text = "Path:" + (custom ?: "/storage/emulated/0/Download/PhoenixDownloader")
+        try {
+            val stat = android.os.StatFs(android.os.Environment.getExternalStorageDirectory().path)
+            val total = stat.totalBytes
+            val free = stat.availableBytes
+            binding.tvDlgStorage.text = "${formatGb(free)} FREE/${formatGb(total)}"
+            binding.pbDlgStorage.max = 100
+            binding.pbDlgStorage.progress =
+                if (total > 0) ((total - free) * 100 / total).toInt() else 0
+        } catch (e: Exception) { /* storage line is decorative */ }
+    }
+
+    private fun formatGb(bytes: Long): String = "%.1fGB".format(bytes / (1024.0 * 1024 * 1024))
+
+    /** Folder picked via the system picker: persist a real filesystem path. */
+    private fun onFolderPicked(uri: android.net.Uri) {
+        // Tree URIs look like /tree/primary:Download/Sub — only the primary
+        // (internal) volume maps to a plain filesystem path yt-dlp can use.
+        val path = uri.path ?: ""
+        val marker = "/tree/primary:"
+        val idx = path.indexOf(marker)
+        if (idx >= 0) {
+            val rel = path.substring(idx + marker.length)
+            val real = android.os.Environment.getExternalStorageDirectory().absolutePath +
+                if (rel.isEmpty()) "" else "/$rel"
+            requireContext().getSharedPreferences("phoenix_downloads", android.content.Context.MODE_PRIVATE)
+                .edit().putString("custom_dir_path", real).apply()
+            updatePathRow()
+            Toast.makeText(requireContext(), "Save to: $real", Toast.LENGTH_SHORT).show()
+        } else {
+            Toast.makeText(
+                requireContext(),
+                "That folder can't be used — internal storage folders only",
+                Toast.LENGTH_LONG
+            ).show()
+        }
     }
 
     private fun fetchFormats() {
@@ -145,7 +219,7 @@ class DownloadDialogFragment : DialogFragment() {
         }
         val item = com.phoenix.downloader.model.DownloadItem(
             id = System.currentTimeMillis(),
-            title = videoTitle.ifEmpty { "Video" },
+            title = displayTitle.ifEmpty { "Video" },
             url = videoUrl,
             formatLabel = formatLabel,
             isAudio = selectedFormatId.startsWith("MP3"),
