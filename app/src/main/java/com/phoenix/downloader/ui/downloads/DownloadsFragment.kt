@@ -11,9 +11,7 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.core.content.FileProvider
 import androidx.fragment.app.Fragment
-import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
-import androidx.lifecycle.repeatOnLifecycle
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.bumptech.glide.Glide
@@ -49,9 +47,7 @@ class DownloadsFragment : Fragment() {
         binding.rvDownloads.adapter = adapter
         rebuild()
         viewLifecycleOwner.lifecycleScope.launch {
-            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
-                DownloadEngine.records.collect { rebuild() }
-            }
+            DownloadEngine.records.collect { rebuild() }
         }
     }
 
