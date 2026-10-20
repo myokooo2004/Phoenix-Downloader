@@ -55,11 +55,20 @@ class DownloadService : Service() {
             monitorStarted = true
             serviceScope.launch {
                 // Keep the notification fresh while work exists, then stop.
+                // Only re-post when something actually changed - re-posting
+                // every 2s made the shade entry churn/flicker.
+                var lastTitle: String? = null
+                var lastText: String? = null
+                var lastProgress = -1
                 while (DownloadEngine.hasActiveWork()) {
                     delay(2000)
                     val (t, x) = DownloadEngine.notificationText()
-                    val nm = getSystemService(NotificationManager::class.java)
-                    nm?.notify(NOTIFICATION_ID, buildNotification(t, x, DownloadEngine.activeProgress()))
+                    val p = DownloadEngine.activeProgress()
+                    if (t != lastTitle || x != lastText || p != lastProgress) {
+                        lastTitle = t; lastText = x; lastProgress = p
+                        val nm = getSystemService(NotificationManager::class.java)
+                        nm?.notify(NOTIFICATION_ID, buildNotification(t, x, p))
+                    }
                 }
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
@@ -108,6 +117,8 @@ class DownloadService : Service() {
             .setContentIntent(openIntent)
             .setProgress(100, progress, progress <= 0)
             .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setShowWhen(false)
             .build()
     }
 

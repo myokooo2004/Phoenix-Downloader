@@ -4,6 +4,7 @@ import android.view.LayoutInflater
 import android.view.ViewGroup
 import androidx.recyclerview.widget.RecyclerView
 import com.bumptech.glide.Glide
+import com.phoenix.downloader.R
 import com.phoenix.downloader.databinding.ItemVideoBinding
 
 data class VideoItem(val url: String, val title: String, val thumbnail: String, val duration: Int)
@@ -28,7 +29,10 @@ class VideoAdapter(
         } else {
             holder.binding.tvDuration.visibility = android.view.View.GONE
         }
-        Glide.with(holder.itemView.context).load(video.thumbnail).into(holder.binding.ivThumb)
+        Glide.with(holder.itemView.context).load(video.thumbnail)
+            .placeholder(R.color.card)
+            .override(720, 405)
+            .into(holder.binding.ivThumb)
         
         holder.itemView.setOnClickListener { onWatchClick(video) }
         holder.binding.btnItemDownload.setOnClickListener { onDownloadClick(video) } 

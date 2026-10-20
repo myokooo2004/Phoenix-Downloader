@@ -32,16 +32,35 @@ class HomeFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         binding.rvVideos.layoutManager = LinearLayoutManager(requireContext())
+        binding.rvVideos.setHasFixedSize(true)
 
-        // Hide search bar on scroll down, show on scroll up (Vidmate-style)
+        // Hide search bar on scroll down, show on scroll up (Vidmate-style).
+        // Hysteresis: toggling visibility forces a full layout pass, so only
+        // flip after ~60dp of accumulated scroll in ONE direction (and only
+        // when the state actually changes) - per-event flips made scrolling
+        // visibly jerky.
+        var searchBarVisible = true
+        var scrollAccum = 0
         // + Infinite scroll: load more when reaching bottom
         binding.rvVideos.addOnScrollListener(object : androidx.recyclerview.widget.RecyclerView.OnScrollListener() {
             override fun onScrolled(recyclerView: androidx.recyclerview.widget.RecyclerView, dx: Int, dy: Int) {
                 super.onScrolled(recyclerView, dx, dy)
-                if (dy > 10) {
-                    binding.searchBarContainer.visibility = View.GONE
-                } else if (dy < -10) {
-                    binding.searchBarContainer.visibility = View.VISIBLE
+                if (dy > 0) {
+                    if (scrollAccum < 0) scrollAccum = 0
+                    scrollAccum += dy
+                    if (searchBarVisible && scrollAccum > 60) {
+                        searchBarVisible = false
+                        binding.searchBarContainer.visibility = View.GONE
+                        scrollAccum = 0
+                    }
+                } else if (dy < 0) {
+                    if (scrollAccum > 0) scrollAccum = 0
+                    scrollAccum += dy
+                    if (!searchBarVisible && scrollAccum < -60) {
+                        searchBarVisible = true
+                        binding.searchBarContainer.visibility = View.VISIBLE
+                        scrollAccum = 0
+                    }
                 }
 
                 // Infinite scroll

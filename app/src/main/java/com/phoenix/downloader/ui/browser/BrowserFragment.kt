@@ -73,6 +73,16 @@ class BrowserFragment : Fragment() {
                     }
                 }
             }
+
+            @android.webkit.JavascriptInterface
+            fun reportDiag(json: String) {
+                try {
+                    val ctx = activity?.applicationContext ?: return
+                    com.phoenix.downloader.core.CrashLogger.logNonFatal(
+                        ctx, "BrowserButtons.final", Exception(json)
+                    )
+                } catch (e: Exception) { /* diagnostics only */ }
+            }
         }, "PhoenixDownloader")
 
         wv.webViewClient = object : WebViewClient() {
@@ -175,7 +185,24 @@ class BrowserFragment : Fragment() {
         val js = """
             (function() {
                 try {
-                    var debug = {anchors: 0, matched: 0, added: 0, noThumb: 0, inPlayer: 0, err: null};
+                    var debug = {anchors: 0, matched: 0, added: 0, refreshed: 0, noThumb: 0, inPlayer: 0, vis: null, err: null};
+                    var stats = window._phxStats || (window._phxStats = {added: 0, refreshed: 0, passes: 0});
+                    var reported = false;
+                    function probeVis(btn) {
+                        try {
+                            var r = btn.getBoundingClientRect();
+                            return (btn.offsetParent ? 'p' : 'np') + '|' + Math.round(r.width) + 'x' + Math.round(r.height) + '|t' + Math.round(r.top);
+                        } catch (e) { return 'probe-err'; }
+                    }
+                    function reportOnce() {
+                        if (reported) return;
+                        reported = true;
+                        try {
+                            if (window.PhoenixDownloader && PhoenixDownloader.reportDiag) {
+                                PhoenixDownloader.reportDiag(JSON.stringify({stats: stats, last: debug, href: location.href}));
+                            }
+                        } catch (e) {}
+                    }
                     var RENDERERS = 'ytm-video-with-context-renderer,ytm-media-item,ytm-compact-video-renderer,ytm-playlist-video-renderer,ytm-playlist-panel-video-renderer,ytd-rich-item-renderer,ytd-video-renderer,ytd-compact-video-renderer,ytd-grid-video-renderer,ytd-playlist-panel-video-renderer,ytd-playlist-video-renderer';
                     function videoIdOf(a) {
                         var href = a.getAttribute('href') || '';
@@ -183,6 +210,8 @@ class BrowserFragment : Fragment() {
                         return m ? m[1] : null;
                     }
                     function addButtons() {
+                        stats.passes++;
+                        debug.added = 0; debug.refreshed = 0;
                         try {
                             var links = document.querySelectorAll('a[href*="watch"]');
                             debug.anchors = links.length;
@@ -201,6 +230,8 @@ class BrowserFragment : Fragment() {
                                 if (existing) {
                                     // Recycled row: refresh the target video
                                     existing.setAttribute('data-vid', vid);
+                                    debug.refreshed++; stats.refreshed++;
+                                    if (!debug.vis) debug.vis = probeVis(existing);
                                     continue;
                                 }
                                 try {
@@ -218,11 +249,13 @@ class BrowserFragment : Fragment() {
                                 btn.addEventListener('click', function(e) {
                                     e.stopPropagation();
                                     e.preventDefault();
-                                    var v = btn.getAttribute('data-vid');
+                                    var t = e.currentTarget;
+                                    var v = t ? t.getAttribute('data-vid') : null;
                                     if (v) PhoenixDownloader.onDownloadClick('https://www.youtube.com/watch?v=' + v);
                                 }, true);
                                 host.appendChild(btn);
-                                debug.added++;
+                                debug.added++; stats.added++;
+                                if (!debug.vis) debug.vis = probeVis(btn);
                             }
                         } catch (e) { debug.err = String(e && e.message || e); }
                         return debug;
@@ -232,8 +265,9 @@ class BrowserFragment : Fragment() {
                     var timer = setInterval(function() {
                         tries++;
                         addButtons();
-                        if (tries >= 10) clearInterval(timer);
+                        if (tries >= 10) { clearInterval(timer); reportOnce(); }
                     }, 1000);
+                    setTimeout(reportOnce, 25000);
                     if (!window._phoenixObserver && document.body) {
                         try {
                             window._phoenixObserver = new MutationObserver(function() { addButtons(); });
