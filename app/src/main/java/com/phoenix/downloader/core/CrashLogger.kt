@@ -18,8 +18,12 @@ object CrashLogger {
     private const val CRASH_FILE = "crash.log"
     private const val MAX_SIZE_BYTES = 256 * 1024 // 256KB
 
+    @Volatile
+    private var appContext: Context? = null
+
     fun init(context: Context) {
         val appContext = context.applicationContext
+        this.appContext = appContext
         val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
 
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
@@ -71,6 +75,20 @@ object CrashLogger {
             appendLine()
         }
         file.appendText(entry)
+    }
+
+    /**
+     * Log a non-fatal from code that has no Context at hand (e.g. the
+     * API client object). Uses the application context captured by
+     * [init]; a no-op before init runs.
+     */
+    fun logNonFatal(tag: String, throwable: Throwable) {
+        val ctx = appContext ?: return
+        try {
+            logNonFatal(ctx, tag, throwable)
+        } catch (_: Exception) {
+            // Never crash the logger's caller
+        }
     }
 
     /** Returns the crash log content, or null if empty/missing. */

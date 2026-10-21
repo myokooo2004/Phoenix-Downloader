@@ -65,6 +65,132 @@ function jsonError(status, message) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// InnerTube "next" — YouTube's own Up next flow (user spec 2026-10-21:
+// Related must be exactly what real YouTube shows, and infinite). The
+// public Data API has no related endpoint anymore (relatedToVideoId was
+// removed in 2023); the search ladder below only approximates it and
+// reads like search results. The youtubei next endpoint returns the
+// genuine recommendation list plus a continuation token for the next
+// page, and costs ZERO Data API quota. Uses the public WEB client key
+// (the same key embedded in every youtube.com page). If anything about
+// the response shape is off, callers fall back to the search ladder.
+// ---------------------------------------------------------------------------
+const INNERTUBE_KEY = "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8";
+const INNERTUBE_CTX = {
+  context: { client: { clientName: "WEB", clientVersion: "2.20240111.09.00", hl: "en", gl: "US" } },
+};
+
+function badgeToSeconds(text) {
+  const parts = String(text || "").split(":").map((s) => parseInt(s, 10));
+  if (parts.some((n) => !isFinite(n))) return 0;
+  return parts.reduce((acc, n) => acc * 60 + n, 0);
+}
+
+// One lockupViewModel (the current Up next item shape) -> the Data API
+// search-result item shape the app already parses. Null when unusable.
+function lockupToItem(lk) {
+  try {
+    const videoId = lk.contentId;
+    if (!videoId || lk.contentType !== "LOCKUP_CONTENT_TYPE_VIDEO") return null;
+    const md = lk.metadata && lk.metadata.lockupMetadataViewModel;
+    const title = md && md.title && md.title.content;
+    if (!title) return null;
+    let channel = "";
+    const rows = (md.metadata && md.metadata.contentMetadataViewModel &&
+      md.metadata.contentMetadataViewModel.metadataRows) || [];
+    if (rows.length) {
+      channel = (rows[0].metadataParts || [])
+        .map((p) => (p.text && p.text.content) || "").join("").trim();
+    }
+    let durationSec = 0;
+    const overlays = (lk.contentImage && lk.contentImage.thumbnailViewModel &&
+      lk.contentImage.thumbnailViewModel.overlays) || [];
+    for (const ov of overlays) {
+      const badges = (ov.thumbnailBottomOverlayViewModel &&
+        ov.thumbnailBottomOverlayViewModel.badges) || [];
+      for (const b of badges) {
+        const t = b.thumbnailBadgeViewModel && b.thumbnailBadgeViewModel.text;
+        if (t) durationSec = badgeToSeconds(t);
+      }
+    }
+    return {
+      id: { videoId },
+      snippet: {
+        title,
+        channelTitle: channel,
+        thumbnails: {
+          default: { url: `https://i.ytimg.com/vi/${videoId}/default.jpg` },
+          medium: { url: `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg` },
+          high: { url: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg` },
+        },
+      },
+      durationSec,
+    };
+  } catch (e) {
+    return null;
+  }
+}
+
+// Walk one results array (first page or a continuation page): collect
+// video items in order plus the list's own continuation token.
+function collectNextItems(arr) {
+  const items = [];
+  let token = null;
+  for (const entry of arr || []) {
+    if (entry.lockupViewModel) {
+      const it = lockupToItem(entry.lockupViewModel);
+      if (it) items.push(it);
+    } else if (entry.continuationItemRenderer) {
+      const t = entry.continuationItemRenderer.continuationEndpoint &&
+        entry.continuationItemRenderer.continuationEndpoint.continuationCommand &&
+        entry.continuationItemRenderer.continuationEndpoint.continuationCommand.token;
+      if (t) token = t;
+    }
+  }
+  return { items, token };
+}
+
+// Returns { items, token } from YouTube's Up next for [videoId], or the
+// next page when [continuation] is given. Null on any failure/shape drift.
+async function innertubeRelated(videoId, continuation) {
+  try {
+    const payload = continuation
+      ? { ...INNERTUBE_CTX, continuation }
+      : { ...INNERTUBE_CTX, videoId };
+    const resp = await fetch(
+      `https://www.youtube.com/youtubei/v1/next?key=${INNERTUBE_KEY}`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+        },
+        body: JSON.stringify(payload),
+      }
+    );
+    if (!resp.ok) return null;
+    const root = await resp.json();
+    if (!continuation) {
+      const sec = root.contents && root.contents.twoColumnWatchNextResults &&
+        root.contents.twoColumnWatchNextResults.secondaryResults &&
+        root.contents.twoColumnWatchNextResults.secondaryResults.secondaryResults;
+      if (!sec || !Array.isArray(sec.results)) return null;
+      return collectNextItems(sec.results);
+    }
+    const eps = root.onResponseReceivedEndpoints || [];
+    for (const ep of eps) {
+      const act = ep.appendContinuationItemsAction;
+      if (act && Array.isArray(act.continuationItems)) {
+        return collectNextItems(act.continuationItems);
+      }
+    }
+    return null;
+  } catch (e) {
+    return null;
+  }
+}
+
 async function handleRequest(request) {
   const key = YT_API_KEY;
   if (!key) return jsonError(500, "YT_API_KEY not configured");
@@ -188,6 +314,45 @@ async function handleRequest(request) {
     if (!videoId && !q) return jsonError(400, "videoId or q required");
     const maxResults = Math.min(parseInt(url.searchParams.get("maxResults") || "20", 10), 50);
     const pageToken = url.searchParams.get("pageToken");
+    // Primary source: YouTube's own Up next (InnerTube). Normalized to
+    // the exact JSON shape the app parses for the ladder below, with
+    // the continuation token riding as nextPageToken — so the app's
+    // existing pagination scrolls YouTube's genuine flow, infinitely.
+    // Any doubt (fetch failed, shape drift, too few items) falls
+    // through to the search ladder, which stays as the fallback.
+    if (videoId) {
+      const cache = caches.default;
+      const cacheKey = new Request(url.toString(), { method: "GET" });
+      const hit = await cache.match(cacheKey);
+      if (hit) return hit;
+      const it = await innertubeRelated(videoId, pageToken);
+      if (it && it.items.length >= 5) {
+        const seen = new Set();
+        const items = [];
+        for (const item of it.items) {
+          const id = item.id.videoId;
+          if (id === videoId || seen.has(id)) continue;
+          seen.add(id);
+          items.push(item);
+          if (items.length >= maxResults) break;
+        }
+        if (items.length >= 5) {
+          const ttl = pageToken ? 300 : 600;
+          const resp = new Response(
+            JSON.stringify({ items, nextPageToken: it.token || null, relatedSource: "innertube-next" }),
+            {
+              headers: {
+                "Content-Type": "application/json",
+                "Cache-Control": `public, max-age=${ttl}`,
+                "Access-Control-Allow-Origin": "*",
+              },
+            }
+          );
+          await cache.put(cacheKey, resp.clone());
+          return resp;
+        }
+      }
+    }
     // The YouTube API flow for "related" (relatedToVideoId was removed by
     // YouTube): 1) videos.list -> the watched video's own metadata
     // (categoryId, tags, title). 2) search.list ordered by viewCount

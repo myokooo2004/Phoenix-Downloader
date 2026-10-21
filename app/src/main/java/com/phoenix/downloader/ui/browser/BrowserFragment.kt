@@ -258,14 +258,17 @@ class BrowserFragment : Fragment() {
         // as too small in the field)
         // ITEM (next to the item's ⋮ menu) — NOT a red circle floating on
         // the thumbnail, and never on the player/header. The host is the
-        // list-item renderer itself (no parent fallback), it must contain
-        // a thumbnail image, and the button scrolls away with its item.
+        // list-item renderer itself; when YouTube's markup has no known
+        // renderer ancestor (home-feed drift, field log 2026-10-21), a
+        // fallback climbs to the single-video card container. The host
+        // must contain a thumbnail image, and the button scrolls away
+        // with its item.
         // YouTube recycles rows while scrolling, so the button stores its
         // video id in data-vid and each scan refreshes it.
         val js = """
             (function() {
                 try {
-                    var debug = {anchors: 0, matched: 0, added: 0, refreshed: 0, noThumb: 0, inPlayer: 0, vis: null, err: null};
+                    var debug = {anchors: 0, matched: 0, added: 0, refreshed: 0, noThumb: 0, inPlayer: 0, noHost: 0, fbAdded: 0, vis: null, err: null};
                     var stats = window._phxStats || (window._phxStats = {added: 0, refreshed: 0, passes: 0});
                     var reported = false;
                     function probeVis(btn) {
@@ -289,6 +292,34 @@ class BrowserFragment : Fragment() {
                         var m = href.match(/[?&]v=([\w-]{11})/);
                         return m ? m[1] : null;
                     }
+                    function fallbackHost(link) {
+                        // Home-feed markup drift (field log 2026-10-21):
+                        // anchors matched but no known renderer ancestor
+                        // existed, so every item was skipped (added=0).
+                        // Climb to the card instead: the highest ancestor
+                        // that still holds exactly ONE distinct video and
+                        // a thumbnail image.
+                        var node = link, best = null;
+                        for (var depth = 0; depth < 8 && node && node !== document.body; depth++) {
+                            node = node.parentElement;
+                            if (!node) break;
+                            if (!node.querySelector('img')) continue;
+                            var anchors = node.querySelectorAll('a[href*="watch"]');
+                            var vids = {};
+                            var distinct = 0;
+                            for (var j = 0; j < anchors.length; j++) {
+                                var v = videoIdOf(anchors[j]);
+                                if (v && !vids[v]) { vids[v] = 1; distinct++; }
+                            }
+                            if (distinct === 1) { best = node; continue; }
+                            if (distinct > 1) break;
+                        }
+                        if (best) {
+                            var r = best.getBoundingClientRect();
+                            if (r.width < 100 || r.height < 60) return null;
+                        }
+                        return best;
+                    }
                     function addButtons() {
                         stats.passes++;
                         debug.added = 0; debug.refreshed = 0;
@@ -301,7 +332,12 @@ class BrowserFragment : Fragment() {
                                 if (!vid) continue;
                                 debug.matched++;
                                 var host = link.closest(RENDERERS);
-                                if (!host) continue;
+                                var viaFallback = false;
+                                if (!host) {
+                                    host = fallbackHost(link);
+                                    viaFallback = !!host;
+                                }
+                                if (!host) { debug.noHost++; continue; }
                                 if (!host.querySelector('img')) { debug.noThumb++; continue; }
                                 if (host.closest('ytm-player,#player,.html5-video-player,ytm-inline-player')) {
                                     debug.inPlayer++; continue;
@@ -335,6 +371,7 @@ class BrowserFragment : Fragment() {
                                 }, true);
                                 host.appendChild(btn);
                                 debug.added++; stats.added++;
+                                if (viaFallback) { debug.fbAdded++; stats.fbAdded = (stats.fbAdded || 0) + 1; }
                                 if (!debug.vis) debug.vis = probeVis(btn);
                             }
                         } catch (e) { debug.err = String(e && e.message || e); }

@@ -26,7 +26,21 @@ object YouTubeApiClient {
     private const val TAG = "YouTubeApiClient"
     // API proxied via Cloudflare Worker (keeps key server-side, adds edge caching).
     // Worker handles regionCode quirks (e.g. YouTube rejects regionCode=MM).
-    private const val WORKER_BASE = "https://api.phoenixdl.dpdns.org"
+    // Primary host (2026-10-21): the original zone's Cloudflare IP pair
+    // sits on an MPT data-flow kill list (proven by Termux s_client
+    // tests — the connections die at the first data packet regardless
+    // of SNI), so the Worker moved to a fresh zone with a clean IP
+    // pair. The old host stays as a fallback (it still works wherever
+    // its IPs are not blocked, and on IPv6-capable networks).
+    private const val WORKER_BASE = "https://api.tugyi.dpdns.org"
+    private val WORKER_HOSTS = listOf(
+        "https://api.tugyi.dpdns.org",
+        "https://api.phoenixdl.dpdns.org"
+    )
+
+    /** Last Worker host that answered; tried first on the next call. */
+    @Volatile
+    private var lastGoodHost: String = WORKER_HOSTS[0]
     // Legacy direct API (kept for reference; not used)
     private const val API_KEY = "AIzaSyDVpveH9BzSa7QZh7QT7Uh2zMasfEWR8Pw"
     private const val BASE_URL = "https://www.googleapis.com/youtube/v3/videos"
@@ -52,14 +66,38 @@ object YouTubeApiClient {
         )
         .build()
 
+    // Second DoH provider (2026-10-21): if Cloudflare's resolver IPs
+    // are themselves unreachable on a given network, Google's public
+    // DoH gets a turn before the (possibly poisoned) system resolver.
+    private val dohGoogleDns: Dns = DnsOverHttps.Builder()
+        .client(OkHttpClient())
+        .url("https://dns.google/dns-query".toHttpUrl())
+        .bootstrapDnsHosts(
+            InetAddress.getByName("8.8.8.8"),
+            InetAddress.getByName("8.8.4.4"),
+            InetAddress.getByName("2001:4860:4860::8888"),
+            InetAddress.getByName("2001:4860:4860::8844")
+        )
+        .build()
+
     private val workerDns = object : Dns {
-        override fun lookup(hostname: String): List<InetAddress> =
+        override fun lookup(hostname: String): List<InetAddress> {
             try {
-                dohDns.lookup(hostname)
+                return dohDns.lookup(hostname)
             } catch (e: Exception) {
-                Log.w(TAG, "DoH lookup failed for $hostname; system DNS fallback", e)
-                Dns.SYSTEM.lookup(hostname)
+                Log.w(TAG, "Cloudflare DoH failed for $hostname; trying Google DoH", e)
             }
+            try {
+                return dohGoogleDns.lookup(hostname)
+            } catch (e: Exception) {
+                Log.w(TAG, "Google DoH failed for $hostname; system DNS fallback", e)
+                CrashLogger.logNonFatal(
+                    TAG,
+                    Exception("both DoH providers failed for $hostname; system DNS fallback", e)
+                )
+            }
+            return Dns.SYSTEM.lookup(hostname)
+        }
     }
 
     private val workerClient: OkHttpClient = OkHttpClient.Builder()
@@ -68,13 +106,8 @@ object YouTubeApiClient {
         .readTimeout(15, TimeUnit.SECONDS)
         .build()
 
-    /**
-     * GET [urlStr] through the DoH-backed client. Returns (status, body);
-     * on a non-200 the body is the error body, matching what callers used
-     * to read from HttpURLConnection.errorStream. Transport failures throw
-     * (callers' existing try/catch and IOException retry logic rely on it).
-     */
-    private fun workerGet(urlStr: String, timeoutMs: Long = 15000L): Pair<Int, String> {
+    /** One attempt against one fully-built URL. Throws on transport failure. */
+    private fun workerGetOnce(urlStr: String, timeoutMs: Long): Pair<Int, String> {
         val client = workerClient.newBuilder()
             .connectTimeout(timeoutMs, TimeUnit.MILLISECONDS)
             .readTimeout(timeoutMs, TimeUnit.MILLISECONDS)
@@ -83,6 +116,37 @@ object YouTubeApiClient {
         client.newCall(request).execute().use { response ->
             return response.code to (response.body?.string() ?: "")
         }
+    }
+
+    /**
+     * GET a Worker URL through the DoH-backed client, trying the known
+     * Worker hosts in order (last host that answered first). A host
+     * counts as failed only on a TRANSPORT error (reset, timeout, DNS);
+     * any HTTP response — even an error status — is returned as-is,
+     * matching what callers used to read from HttpURLConnection.
+     * When every host fails, the failure is written to the in-app crash
+     * log (field diagnosis must not depend on logcat) and the last
+     * transport exception is thrown, preserving callers' IOException
+     * retry semantics.
+     */
+    private fun workerGet(urlStr: String, timeoutMs: Long = 15000L): Pair<Int, String> {
+        val path = urlStr.removePrefix(WORKER_BASE)
+        if (path == urlStr) return workerGetOnce(urlStr, timeoutMs)
+        val order = listOf(lastGoodHost) + WORKER_HOSTS.filter { it != lastGoodHost }
+        var lastError: Exception? = null
+        for (host in order) {
+            try {
+                val result = workerGetOnce(host + path, timeoutMs)
+                lastGoodHost = host
+                return result
+            } catch (e: Exception) {
+                Log.w(TAG, "Worker host failed: $host$path", e)
+                lastError = e
+            }
+        }
+        val failure = lastError ?: java.io.IOException("all Worker hosts failed: $path")
+        CrashLogger.logNonFatal(TAG, Exception("all Worker hosts failed for $path", failure))
+        throw failure
     }
 
     /**
@@ -241,9 +305,9 @@ object YouTubeApiClient {
     }
 
     /**
-     * Fetch one page of related videos (Worker /related -> search.list by
-     * title; relatedToVideoId is deprecated). Pass [pageToken] from the
-     * previous page for infinite scrolling.
+     * Fetch one page of related videos (Worker /related -> YouTube's own
+     * Up next via InnerTube, with a search.list ladder as fallback).
+     * Pass [pageToken] from the previous page for infinite scrolling.
      */
     suspend fun getRelatedVideos(
         videoId: String,
