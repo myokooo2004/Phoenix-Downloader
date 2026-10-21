@@ -1,0 +1,118 @@
+name: Update Trending Videos
+
+on:
+  schedule:
+    # Daily at 00:00 UTC (06:30 Myanmar)
+    - cron: '0 0 * * *'
+  workflow_dispatch: # Manual trigger
+
+jobs:
+  update-trending:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install yt-dlp
+        run: |
+          sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp
+          sudo chmod +x /usr/local/bin/yt-dlp
+          yt-dlp --version
+
+      - name: Fetch YouTube trending
+        run: |
+          python3 << 'PYEOF'
+          import json
+          import subprocess
+          import sys
+
+          def fetch_with_ytdlp(url, max_videos=20):
+              """Fetch videos from a URL with yt-dlp, return list of video dicts."""
+              videos = []
+              try:
+                  result = subprocess.run(
+                      ['yt-dlp', '--flat-playlist', '--dump-json', '--no-download',
+                       '--playlist-end', str(max_videos * 2),
+                       '--no-check-certificate',
+                       '--user-agent', 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36',
+                       url],
+                      capture_output=True, text=True, timeout=180
+                  )
+                  if result.stderr:
+                      print(f"yt-dlp stderr for {url}: {result.stderr[:500]}", file=sys.stderr)
+
+                  for line in result.stdout.strip().split('\n'):
+                      if not line.strip():
+                          continue
+                      try:
+                          data = json.loads(line)
+                          video_id = data.get('id', '')
+                          if not video_id or len(video_id) > 20:  # Skip playlist IDs
+                              continue
+                          thumbnails = data.get('thumbnails', [])
+                          thumb_url = thumbnails[-1]['url'] if thumbnails else None
+                          title = data.get('title', '')
+                          if not title:
+                              continue
+                          videos.append({
+                              'url': f'https://www.youtube.com/watch?v={video_id}',
+                              'title': title,
+                              'uploader': data.get('uploader', ''),
+                              'duration': data.get('duration', 0),
+                              'viewCount': data.get('view_count', 0),
+                              'thumbnailUrl': thumb_url,
+                          })
+                          if len(videos) >= max_videos:
+                              break
+                      except:
+                          continue
+              except subprocess.TimeoutExpired:
+                  print(f"Timeout for {url}", file=sys.stderr)
+              except Exception as e:
+                  print(f"Error for {url}: {e}", file=sys.stderr)
+              return videos
+
+          videos = []
+
+          # Try 1: YouTube trending feed
+          print("Trying YouTube trending feed...")
+          videos = fetch_with_ytdlp('https://www.youtube.com/feed/trending', 20)
+          print(f"Trending feed: {len(videos)} videos")
+
+          # Try 2: Fallback - search for popular music videos (Myanmar)
+          if len(videos) < 5:
+              print("Trying fallback: popular music search...")
+              videos = fetch_with_ytdlp('ytsearch20:Myanmar music popular', 20)
+              print(f"Fallback search: {len(videos)} videos")
+
+          # Try 3: Fallback - generic popular videos
+          if len(videos) < 5:
+              print("Trying fallback: generic trending search...")
+              videos = fetch_with_ytdlp('ytsearch20:trending music 2026', 20)
+              print(f"Generic search: {len(videos)} videos")
+
+          # Save to trending.json
+          output = {
+              'updated': __import__('datetime').datetime.utcnow().isoformat() + 'Z',
+              'videos': videos
+          }
+
+          with open('trending.json', 'w', encoding='utf-8') as f:
+              json.dump(output, f, ensure_ascii=False, indent=2)
+
+          print(f"Saved {len(videos)} trending videos")
+          if len(videos) == 0:
+              print("WARNING: No videos fetched!", file=sys.stderr)
+              sys.exit(1)
+          PYEOF
+
+      - name: Commit and push
+        run: |
+          git config user.name "Bumblemuse"
+          git config user.email "bumblemuse@local"
+          git add trending.json
+          git diff --staged --quiet || git commit -m "Update trending videos"
+          git push
