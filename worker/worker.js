@@ -82,6 +82,84 @@ async function handleRequest(request) {
     });
   }
 
+  if (path === "/trending.json") {
+    // Normalized trending for the GitHub mirror: scripts/refresh_
+    // trending.py republishes this to the repo's data branch hourly and
+    // the app reads it from raw.githubusercontent.com, which stays
+    // reachable on networks that block this Worker's hosts (the app then
+    // needs no VPN for Home). Same upstream data as /trending, flattened
+    // to {videos:[{url,title,thumbnailUrl,duration}],nextPageToken} with
+    // durations resolved via one videos.list contentDetails call.
+    const cache = caches.default;
+    const cacheKey = new Request(url.toString(), { method: "GET" });
+    const hit = await cache.match(cacheKey);
+    if (hit) return hit;
+    const region = url.searchParams.get("region") || "MM";
+    const maxResults = Math.min(parseInt(url.searchParams.get("maxResults") || "20", 10), 50);
+    const pageToken = url.searchParams.get("pageToken");
+    let api;
+    if (region === "MM") {
+      api = `${YT_BASE}/search?part=snippet&q=${encodeURIComponent("Myanmar music")}&type=video&maxResults=${maxResults}&key=${key}`;
+    } else {
+      api = `${YT_BASE}/videos?part=snippet,contentDetails,statistics&chart=mostPopular&regionCode=${encodeURIComponent(region)}&maxResults=${maxResults}&key=${key}`;
+    }
+    if (pageToken) api += `&pageToken=${encodeURIComponent(pageToken)}`;
+    const upstream = await (await ytFetch(api, 3600)).clone().json().catch(() => null);
+    const items = (upstream && upstream.items) || [];
+    // Durations: the chart response carries contentDetails inline; the
+    // search response does not, so resolve those ids in one batch call.
+    const durations = {};
+    const missing = [];
+    for (const it of items) {
+      const id = typeof it.id === "string" ? it.id : (it.id && it.id.videoId) || null;
+      if (!id) continue;
+      const iso = it.contentDetails && it.contentDetails.duration;
+      if (iso) durations[id] = iso; else missing.push(id);
+    }
+    if (missing.length) {
+      try {
+        const dApi = `${YT_BASE}/videos?part=contentDetails&id=${missing.join(",")}&key=${key}`;
+        const dJson = await (await ytFetch(dApi, 3600)).clone().json().catch(() => null);
+        for (const d of (dJson && dJson.items) || []) {
+          if (d.contentDetails && d.contentDetails.duration) durations[d.id] = d.contentDetails.duration;
+        }
+      } catch (e) { /* durations stay 0 for those items */ }
+    }
+    const isoToSec = (iso) => {
+      const m = /^PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$/.exec(iso || "");
+      if (!m) return 0;
+      return (parseInt(m[1] || "0", 10) * 3600) + (parseInt(m[2] || "0", 10) * 60) + parseInt(m[3] || "0", 10);
+    };
+    const videos = [];
+    for (const it of items) {
+      const id = typeof it.id === "string" ? it.id : (it.id && it.id.videoId) || null;
+      const sn = it.snippet || {};
+      if (!id || !sn.title) continue;
+      const th = sn.thumbnails || {};
+      videos.push({
+        url: `https://www.youtube.com/watch?v=${id}`,
+        title: sn.title,
+        thumbnailUrl: (th.high && th.high.url) || (th.medium && th.medium.url) || (th.default && th.default.url) || "",
+        duration: isoToSec(durations[id]),
+      });
+    }
+    const resp = new Response(
+      JSON.stringify({ videos, nextPageToken: (upstream && upstream.nextPageToken) || null }),
+      {
+        headers: {
+          "Content-Type": "application/json",
+          "Cache-Control": "public, max-age=3600",
+          "Access-Control-Allow-Origin": "*",
+        },
+      }
+    );
+    // Never pin an empty page in the edge cache: an upstream quota 429
+    // yields zero items, and caching that would keep the mirror chain
+    // truncated for an hour after the quota resets.
+    if (videos.length) await cache.put(cacheKey, resp.clone());
+    return resp;
+  }
+
   if (path === "/trending") {
     const region = url.searchParams.get("region") || "MM";
     const maxResults = Math.min(parseInt(url.searchParams.get("maxResults") || "20", 10), 50);

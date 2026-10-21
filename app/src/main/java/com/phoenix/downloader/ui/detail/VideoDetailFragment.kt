@@ -155,12 +155,38 @@ class VideoDetailFragment : Fragment() {
      * client's own network retry): a transient API 429/reset on weak
      * mobile data must not leave the section empty.
      */
+    private fun buildRelatedAdapter(): VideoAdapter {
+        return VideoAdapter(
+            relatedItems,
+            onWatchClick = { video ->
+                parentFragmentManager.beginTransaction()
+                    .replace(
+                        (requireView().parent as View).id,
+                        newInstance(video.url, video.title, video.thumbnail, video.duration)
+                    )
+                    .addToBackStack(null)
+                    .commit()
+            },
+            onDownloadClick = { video ->
+                DownloadDialogFragment.newInstance(video.url, video.title)
+                    .show(childFragmentManager, "DownloadDialog")
+            }
+        )
+    }
+
     private fun loadRelated() {
         val videoId = YouTubeApiClient.extractVideoId(videoUrl) ?: return
         if (relatedLoading) return
         relatedLoading = true
         val token = relatedNextToken
-        val firstPage = relatedAdapter == null
+        // Returning from the back stack (a deeper detail was opened and
+        // closed): the retained items repaint instantly; the fetch below
+        // appends behind them. The adapter was dropped in onDestroyView —
+        // without this the section stayed blank on return.
+        if (relatedAdapter == null && relatedItems.isNotEmpty()) {
+            relatedAdapter = buildRelatedAdapter()
+            binding.rvRelated.adapter = relatedAdapter
+        }
         viewLifecycleOwner.lifecycleScope.launch {
             var result = YouTubeApiClient.getRelatedVideos(videoId, 20, videoTitle, token)
             if (result.isFailure) {
@@ -190,26 +216,10 @@ class VideoDetailFragment : Fragment() {
                     Exception("related total=${relatedItems.size} (+${fresh.size}) next=${relatedNextToken != null} source=related-popular videoId=$videoId")
                 )
             }
-            if (firstPage) {
+            if (relatedAdapter == null) {
                 if (relatedItems.isNotEmpty()) {
-                    val adapter = VideoAdapter(
-                        relatedItems,
-                        onWatchClick = { video ->
-                            parentFragmentManager.beginTransaction()
-                                .replace(
-                                    (requireView().parent as View).id,
-                                    newInstance(video.url, video.title, video.thumbnail, video.duration)
-                                )
-                                .addToBackStack(null)
-                                .commit()
-                        },
-                        onDownloadClick = { video ->
-                            DownloadDialogFragment.newInstance(video.url, video.title)
-                                .show(childFragmentManager, "DownloadDialog")
-                        }
-                    )
-                    relatedAdapter = adapter
-                    binding.rvRelated.adapter = adapter
+                    relatedAdapter = buildRelatedAdapter()
+                    binding.rvRelated.adapter = relatedAdapter
                 }
             } else if (fresh.isNotEmpty()) {
                 relatedAdapter?.notifyItemRangeInserted(insertAt, fresh.size)
@@ -258,6 +268,12 @@ class VideoDetailFragment : Fragment() {
         super.onDestroyView()
         player?.release()
         player = null
+        // Same back-stack trap as HomeFragment: the adapter belongs to
+        // the destroyed RecyclerView, and a fetch cancelled with the view
+        // never resets relatedLoading. Clear both or the related section
+        // stays blank (and unrefreshable) when this page is returned to.
+        relatedAdapter = null
+        relatedLoading = false
         _binding = null
     }
 

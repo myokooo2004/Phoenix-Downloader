@@ -356,6 +356,34 @@ object YouTubeApiClient {
     }
 
     /**
+     * Trending mirror hosted on this repo's `data` branch (refreshed
+     * hourly by CI from the Worker's /trending.json). raw.githubuser-
+     * content.com is reachable on networks where the Worker's own hosts
+     * are blocked, so Home fills and keeps scrolling without a VPN
+     * (user field report 2026-10-21). Empty on failure — Home falls
+     * back to the Worker path.
+     */
+    suspend fun fetchTrendingFeed(): List<VideoItem> = withContext(Dispatchers.IO) {
+        try {
+            val conn = URL("https://raw.githubusercontent.com/myokooo2004/Phoenix-Downloader/data/trending.json")
+                .openConnection() as HttpURLConnection
+            conn.connectTimeout = 10000
+            conn.readTimeout = 10000
+            if (conn.responseCode != 200) return@withContext emptyList()
+            val arr = JSONObject(conn.inputStream.bufferedReader().readText()).optJSONArray("videos")
+                ?: return@withContext emptyList()
+            (0 until arr.length()).mapNotNull { i ->
+                val o = arr.optJSONObject(i) ?: return@mapNotNull null
+                val u = o.optString("url")
+                if (u.isBlank()) return@mapNotNull null
+                VideoItem(u, o.optString("title"), o.optString("thumbnailUrl"), o.optInt("duration"))
+            }
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    /**
      * Hot Searches composed by the Worker from YouTube's own suggestion
      * rankings (no hand-picked terms anywhere). Empty on failure — the
      * search screen then keeps its cached list, or hides the section.

@@ -1,0 +1,46 @@
+name: Refresh trending feed
+
+# Keeps the data branch's trending.json fresh: the app reads Home's
+# trending list from raw.githubusercontent.com (reachable without a VPN
+# where the API Worker's hosts are blocked). Every 6 hours is deliberate
+# quota discipline — each refresh chains 5 search.list pages (~500
+# units) via the Worker; more frequent runs would starve /related and
+# /search, which share the same daily quota.
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main (script)
+        uses: actions/checkout@v4
+        with:
+          path: src
+
+      - name: Checkout data branch (feed)
+        uses: actions/checkout@v4
+        with:
+          ref: data
+          path: data
+
+      - name: Fetch + write trending.json
+        run: python3 src/scripts/refresh_trending.py data/trending.json
+
+      - name: Commit if changed
+        working-directory: data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add trending.json
+          if git diff --cached --quiet; then
+            echo "no change"
+          else
+            git commit -m "Trending refresh"
+            git push
+          fi

@@ -108,8 +108,12 @@ class HomeFragment : Fragment() {
                 com.phoenix.downloader.core.TrendingCache.load(requireContext())
                     .ifEmpty { loadBundledTrending() }
             )
-            if (videoList.isNotEmpty()) ensureAdapter()
         }
+        // A retained fragment returning from the back stack keeps its
+        // videoList but gets a NEW RecyclerView: the adapter must be
+        // (re)attached here. onDestroyView drops the stale adapter —
+        // without this, coming back to Home showed a blank list.
+        if (videoList.isNotEmpty()) ensureAdapter()
 
         loadTrendingData()
         
@@ -165,6 +169,17 @@ class HomeFragment : Fragment() {
         if (isLoading) return
         isLoading = true
         viewLifecycleOwner.lifecycleScope.launch {
+            // Mirror first (user field report 2026-10-21): the GitHub-
+            // hosted trending feed is reachable WITHOUT a VPN on networks
+            // that block the Worker's own hosts, and it carries ~120
+            // items, so Home fills and keeps scrolling. The Worker path
+            // below stays as the fallback.
+            val feed = YouTubeApiClient.fetchTrendingFeed()
+            if (feed.isNotEmpty()) {
+                isLoading = false
+                applyFirstPage(feed, null)
+                return@launch
+            }
             // Background refresh: whatever is already on screen (disk
             // cache or bundled snapshot) STAYS if the network fails.
             val result = YouTubeApiClient.getTrending("MM", 20, null)
@@ -172,19 +187,7 @@ class HomeFragment : Fragment() {
             if (result.isSuccess) {
                 val (videos, token) = result.getOrNull() ?: Pair(emptyList(), null)
                 if (videos.isNotEmpty()) {
-                    context?.let { com.phoenix.downloader.core.TrendingCache.save(it, videos) }
-                    if (binding.rvVideos.computeVerticalScrollOffset() > 0) {
-                        // The user is already scrolling through the cached
-                        // list: swapping content under their finger would
-                        // yank the scroll position. The fresh list is saved
-                        // to disk and appears on the next app open instead.
-                        return@launch
-                    }
-                    nextPageToken = token
-                    videoList.clear()
-                    videoList.addAll(videos)
-                    if (videoAdapter == null) ensureAdapter()
-                    else videoAdapter?.notifyDataSetChanged()
+                    applyFirstPage(videos, token)
                     return@launch
                 }
             }
@@ -196,6 +199,23 @@ class HomeFragment : Fragment() {
                 Toast.makeText(requireContext(), "Data မရပါ", Toast.LENGTH_SHORT).show()
             }
         }
+    }
+
+    /** Cache + paint a fresh first page, unless the user is mid-scroll. */
+    private fun applyFirstPage(videos: List<VideoItem>, token: String?) {
+        context?.let { com.phoenix.downloader.core.TrendingCache.save(it, videos) }
+        if (binding.rvVideos.computeVerticalScrollOffset() > 0) {
+            // The user is already scrolling through the cached list:
+            // swapping content under their finger would yank the scroll
+            // position. The fresh list is saved to disk and appears on
+            // the next app open instead.
+            return
+        }
+        nextPageToken = token
+        videoList.clear()
+        videoList.addAll(videos)
+        if (videoAdapter == null) ensureAdapter()
+        else videoAdapter?.notifyDataSetChanged()
     }
 
     private fun loadMoreTrending() {
@@ -238,5 +258,10 @@ class HomeFragment : Fragment() {
     override fun onDestroyView() {
         super.onDestroyView()
         _binding = null
+        // The adapter belongs to the destroyed RecyclerView, and a fetch
+        // cancelled with the view never resets isLoading: clear both, or
+        // a back-stack return leaves Home blank and unrefreshable.
+        videoAdapter = null
+        isLoading = false
     }
 }
