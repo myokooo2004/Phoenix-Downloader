@@ -503,46 +503,29 @@ async function handleRequest(request) {
   if (path === "/search") {
     const q = url.searchParams.get("q");
     if (!q) return jsonError(400, "q required");
-    const maxResults = Math.min(parseInt(url.searchParams.get("maxResults") || "20", 10), 50);
     const pageToken = url.searchParams.get("pageToken");
-    // Primary source: YouTube's own search (InnerTube), normalized to
-    // the Data API shape the app parses, continuation as nextPageToken.
-    // Falls through to search.list on any doubt.
-    const cache = caches.default;
-    const cacheKey = new Request(url.toString(), { method: "GET" });
-    const hit = await cache.match(cacheKey);
-    if (hit) return hit;
+    // YouTube's own search (InnerTube), passed through UNTOUCHED —
+    // same purity rule as /related (user 2026-10-21): the video
+    // entries of YouTube's response, in YouTube's order, with
+    // YouTube's own thumbnails; no dedupe, no cap, no edge cache,
+    // and no substitute source when YouTube cannot be reached.
+    // (Non-video entries — channels, playlists, shelves — are not
+    // videos and the app lists videos only; every video YouTube
+    // returns is served.) Costs ZERO Data API quota; the old
+    // search.list path (100 units/call) was removed on this rule.
     const it = await innertubeSearch(q, pageToken);
-    if (it && it.items.length >= 5) {
-      const seen = new Set();
-      const items = [];
-      for (const item of it.items) {
-        const id = item.id.videoId;
-        if (seen.has(id)) continue;
-        seen.add(id);
-        items.push(item);
-        if (items.length >= maxResults) break;
-      }
-      if (items.length >= 5) {
-        const ttl = pageToken ? 300 : 600;
-        const resp = new Response(
-          JSON.stringify({ items, nextPageToken: it.token || null, searchSource: "innertube" }),
-          {
-            headers: {
-              "Content-Type": "application/json",
-              "Cache-Control": `public, max-age=${ttl}`,
-              "Access-Control-Allow-Origin": "*",
-            },
-          }
-        );
-        await cache.put(cacheKey, resp.clone());
-        return resp;
-      }
+    if (it && it.items.length) {
+      return new Response(
+        JSON.stringify({ items: it.items, nextPageToken: it.token || null, searchSource: "innertube" }),
+        {
+          headers: {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+          },
+        }
+      );
     }
-    let api = `${YT_BASE}/search?part=snippet&q=${encodeURIComponent(q)}&type=video&maxResults=${maxResults}&key=${key}`;
-    if (pageToken) api += `&pageToken=${encodeURIComponent(pageToken)}`;
-    // Search results shift; short cache to save quota (10 min)
-    return ytFetch(api, 600);
+    return jsonError(502, "search unavailable");
   }
 
   if (path === "/comments") {
