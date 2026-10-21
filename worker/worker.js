@@ -35,29 +35,6 @@ async function ytFetch(url, cacheTtlSeconds) {
   return out;
 }
 
-// Strip title noise ([Official MV], (Lyrics), | channel suffix, #tags) so
-// the search query keeps just the artist + title in its own language.
-function cleanTitleQuery(t) {
-  let s = (t || "").replace(/\[[^\]]*\]/g, " ").replace(/\([^)]*\)/g, " ");
-  s = s.split("|")[0];
-  s = s.replace(/#\S+/g, " ");
-  s = s.replace(/\s+/g, " ").trim();
-  return s || (t || "");
-}
-
-// One search.list attempt for the related ladder. Returns the raw
-// response plus how many items it carried, so the caller can widen the
-// query when a narrow one (long specific tags) matches almost nothing.
-async function searchOnce(key, query, categoryId, pageToken, maxResults) {
-  let api = `${YT_BASE}/search?part=snippet&q=${encodeURIComponent(query)}&type=video&order=viewCount&maxResults=${maxResults}&key=${key}`;
-  if (categoryId) api += `&videoCategoryId=${encodeURIComponent(categoryId)}`;
-  if (pageToken) api += `&pageToken=${encodeURIComponent(pageToken)}`;
-  const resp = await ytFetch(api, 7200);
-  if (!resp.ok) return { resp, count: -1, status: resp.status };
-  const j = await resp.clone().json().catch(() => null);
-  return { resp, count: j && Array.isArray(j.items) ? j.items.length : 0, status: resp.status };
-}
-
 function jsonError(status, message) {
   return new Response(JSON.stringify({ error: message }), {
     status,
@@ -69,12 +46,11 @@ function jsonError(status, message) {
 // InnerTube "next" — YouTube's own Up next flow (user spec 2026-10-21:
 // Related must be exactly what real YouTube shows, and infinite). The
 // public Data API has no related endpoint anymore (relatedToVideoId was
-// removed in 2023); the search ladder below only approximates it and
-// reads like search results. The youtubei next endpoint returns the
+// removed in 2023), and a search-based approximation reads like search
+// results, not recommendations. The youtubei next endpoint returns the
 // genuine recommendation list plus a continuation token for the next
 // page, and costs ZERO Data API quota. Uses the public WEB client key
-// (the same key embedded in every youtube.com page). If anything about
-// the response shape is off, callers fall back to the search ladder.
+// (the same key embedded in every youtube.com page).
 // ---------------------------------------------------------------------------
 const INNERTUBE_KEY = "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8";
 const INNERTUBE_CTX = {
@@ -114,16 +90,36 @@ function lockupToItem(lk) {
         if (t) durationSec = badgeToSeconds(t);
       }
     }
+    // Thumbnails: YouTube's own URLs, untouched (user rule 2026-10-21:
+    // no modifications from our side). The lockup carries the real
+    // source list; use the largest for high/medium, smallest for
+    // default. Only when YouTube gave none do we synthesize the
+    // standard per-video URL.
+    const sources = ((lk.contentImage && lk.contentImage.thumbnailViewModel &&
+      lk.contentImage.thumbnailViewModel.image &&
+      lk.contentImage.thumbnailViewModel.image.sources) || [])
+      .filter((s) => s && s.url);
+    let thumbs;
+    if (sources.length) {
+      const sorted = [...sources].sort((a, b) => (a.width || 0) - (b.width || 0));
+      thumbs = {
+        default: { url: sorted[0].url },
+        medium: { url: sorted[sorted.length - 1].url },
+        high: { url: sorted[sorted.length - 1].url },
+      };
+    } else {
+      thumbs = {
+        default: { url: `https://i.ytimg.com/vi/${videoId}/default.jpg` },
+        medium: { url: `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg` },
+        high: { url: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg` },
+      };
+    }
     return {
       id: { videoId },
       snippet: {
         title,
         channelTitle: channel,
-        thumbnails: {
-          default: { url: `https://i.ytimg.com/vi/${videoId}/default.jpg` },
-          medium: { url: `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg` },
-          high: { url: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg` },
-        },
+        thumbnails: thumbs,
       },
       durationSec,
     };
@@ -183,6 +179,122 @@ async function innertubeRelated(videoId, continuation) {
       const act = ep.appendContinuationItemsAction;
       if (act && Array.isArray(act.continuationItems)) {
         return collectNextItems(act.continuationItems);
+      }
+    }
+    return null;
+  } catch (e) {
+    return null;
+  }
+}
+
+// One classic videoRenderer (search results still use it) -> the same
+// Data API item shape as lockupToItem. Null when unusable.
+function videoRendererToItem(vr) {
+  try {
+    const videoId = vr.videoId;
+    if (!videoId) return null;
+    const title = ((vr.title && vr.title.runs) || [])
+      .map((r) => r.text || "").join("").trim() || (vr.title && vr.title.simpleText) || "";
+    if (!title) return null;
+    const channel = ((vr.longBylineText && vr.longBylineText.runs) || [])
+      .map((r) => r.text || "").join("").trim();
+    // YouTube's own thumbnail URLs, untouched (same rule as lockups).
+    const vsources = ((vr.thumbnail && vr.thumbnail.thumbnails) || [])
+      .filter((s) => s && s.url);
+    let vthumbs;
+    if (vsources.length) {
+      const sorted = [...vsources].sort((a, b) => (a.width || 0) - (b.width || 0));
+      vthumbs = {
+        default: { url: sorted[0].url },
+        medium: { url: sorted[sorted.length - 1].url },
+        high: { url: sorted[sorted.length - 1].url },
+      };
+    } else {
+      vthumbs = {
+        default: { url: `https://i.ytimg.com/vi/${videoId}/default.jpg` },
+        medium: { url: `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg` },
+        high: { url: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg` },
+      };
+    }
+    return {
+      id: { videoId },
+      snippet: {
+        title,
+        channelTitle: channel,
+        thumbnails: vthumbs,
+      },
+      durationSec: badgeToSeconds(vr.lengthText && vr.lengthText.simpleText),
+    };
+  } catch (e) {
+    return null;
+  }
+}
+
+// Walk a mixed search-results array: item sections recurse; video
+// renderers and video lockups collect in order; channels, playlists
+// and shelves are skipped (the app lists videos only, like the Data
+// API's type=video). The list's continuation token rides along.
+function collectSearchItems(entries) {
+  const items = [];
+  let token = null;
+  for (const entry of entries || []) {
+    if (entry.itemSectionRenderer) {
+      const sub = collectSearchItems(entry.itemSectionRenderer.contents);
+      items.push(...sub.items);
+      if (sub.token) token = sub.token;
+    } else if (entry.videoRenderer) {
+      const it = videoRendererToItem(entry.videoRenderer);
+      if (it) items.push(it);
+    } else if (entry.lockupViewModel) {
+      const it = lockupToItem(entry.lockupViewModel);
+      if (it) items.push(it);
+    } else if (entry.continuationItemRenderer) {
+      const t = entry.continuationItemRenderer.continuationEndpoint &&
+        entry.continuationItemRenderer.continuationEndpoint.continuationCommand &&
+        entry.continuationItemRenderer.continuationEndpoint.continuationCommand.token;
+      if (t) token = t;
+    }
+  }
+  return { items, token };
+}
+
+// YouTube's own search via InnerTube (user spec 2026-10-21): the same
+// results youtube.com shows, with continuations for infinite scroll,
+// at ZERO Data API quota — search.list at 100 units/call was the
+// quota burn that exhausted the project daily. Returns {items, token}
+// or null on any failure/shape drift; callers fall back to search.list.
+// Note: search continuations arrive under onResponseReceivedCommands
+// (the next endpoint used onResponseReceivedEndpoints) — check both.
+async function innertubeSearch(query, continuation) {
+  try {
+    const payload = continuation
+      ? { ...INNERTUBE_CTX, continuation }
+      : { ...INNERTUBE_CTX, query };
+    const resp = await fetch(
+      `https://www.youtube.com/youtubei/v1/search?key=${INNERTUBE_KEY}`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+        },
+        body: JSON.stringify(payload),
+      }
+    );
+    if (!resp.ok) return null;
+    const root = await resp.json();
+    if (!continuation) {
+      const sl = root.contents && root.contents.twoColumnSearchResultsRenderer &&
+        root.contents.twoColumnSearchResultsRenderer.primaryContents &&
+        root.contents.twoColumnSearchResultsRenderer.primaryContents.sectionListRenderer;
+      if (!sl || !Array.isArray(sl.contents)) return null;
+      return collectSearchItems(sl.contents);
+    }
+    const groups = [...(root.onResponseReceivedEndpoints || []), ...(root.onResponseReceivedCommands || [])];
+    for (const ep of groups) {
+      const act = ep.appendContinuationItemsAction;
+      if (act && Array.isArray(act.continuationItems)) {
+        return collectSearchItems(act.continuationItems);
       }
     }
     return null;
@@ -310,114 +422,31 @@ async function handleRequest(request) {
 
   if (path === "/related") {
     const videoId = url.searchParams.get("videoId");
-    const q = url.searchParams.get("q");
-    if (!videoId && !q) return jsonError(400, "videoId or q required");
-    const maxResults = Math.min(parseInt(url.searchParams.get("maxResults") || "20", 10), 50);
+    if (!videoId) return jsonError(400, "videoId required");
     const pageToken = url.searchParams.get("pageToken");
-    // Primary source: YouTube's own Up next (InnerTube). Normalized to
-    // the exact JSON shape the app parses for the ladder below, with
-    // the continuation token riding as nextPageToken — so the app's
-    // existing pagination scrolls YouTube's genuine flow, infinitely.
-    // Any doubt (fetch failed, shape drift, too few items) falls
-    // through to the search ladder, which stays as the fallback.
-    if (videoId) {
-      const cache = caches.default;
-      const cacheKey = new Request(url.toString(), { method: "GET" });
-      const hit = await cache.match(cacheKey);
-      if (hit) return hit;
-      const it = await innertubeRelated(videoId, pageToken);
-      if (it && it.items.length >= 5) {
-        const seen = new Set();
-        const items = [];
-        for (const item of it.items) {
-          const id = item.id.videoId;
-          if (id === videoId || seen.has(id)) continue;
-          seen.add(id);
-          items.push(item);
-          if (items.length >= maxResults) break;
+    // YouTube's own Up next (InnerTube), passed through UNTOUCHED —
+    // user rule 2026-10-21: exactly as YouTube serves it, no
+    // modifications from our side. No filtering, no dedupe, no cap,
+    // no edge cache (YouTube rotates the anonymous list; a cached
+    // copy would no longer be what YouTube shows now), and NO
+    // substitute list when YouTube cannot be reached — an honest
+    // error beats a list that is not YouTube's flow. The only
+    // transformation is the JSON reshaping the app parses (renderer
+    // -> item fields, continuation -> nextPageToken). The old
+    // search.list ladder was removed entirely on this rule.
+    const it = await innertubeRelated(videoId, pageToken);
+    if (it && it.items.length) {
+      return new Response(
+        JSON.stringify({ items: it.items, nextPageToken: it.token || null, relatedSource: "innertube-next" }),
+        {
+          headers: {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+          },
         }
-        if (items.length >= 5) {
-          const ttl = pageToken ? 300 : 600;
-          const resp = new Response(
-            JSON.stringify({ items, nextPageToken: it.token || null, relatedSource: "innertube-next" }),
-            {
-              headers: {
-                "Content-Type": "application/json",
-                "Cache-Control": `public, max-age=${ttl}`,
-                "Access-Control-Allow-Origin": "*",
-              },
-            }
-          );
-          await cache.put(cacheKey, resp.clone());
-          return resp;
-        }
-      }
+      );
     }
-    // The YouTube API flow for "related" (relatedToVideoId was removed by
-    // YouTube): 1) videos.list -> the watched video's own metadata
-    // (categoryId, tags, title). 2) search.list ordered by viewCount
-    // (popular first) inside that category, using the video's own
-    // tags/title as the terms — so the terms carry the video's own
-    // language/topic: English video -> English popular, Myanmar video ->
-    // Myanmar popular, Myanmar melody -> Myanmar melody popular.
-    // Spec: user 2026-10-20.
-    let titleQuery = cleanTitleQuery(q || "");
-    let tagsQuery = "";
-    let categoryId = "";
-    if (videoId) {
-      try {
-        const metaResp = await ytFetch(
-          `${YT_BASE}/videos?part=snippet&id=${encodeURIComponent(videoId)}&key=${key}`,
-          86400
-        );
-        if (metaResp.ok) {
-          const meta = await metaResp.json();
-          const snip = meta.items && meta.items[0] && meta.items[0].snippet;
-          if (snip) {
-            categoryId = snip.categoryId || "";
-            const tags = Array.isArray(snip.tags) ? snip.tags.slice(0, 2).join(" ") : "";
-            tagsQuery = cleanTitleQuery(tags);
-            titleQuery = cleanTitleQuery(snip.title || "") || titleQuery;
-          }
-        }
-      } catch (e) { /* metadata failed: title query only */ }
-    }
-    if (!tagsQuery && !titleQuery) {
-      const only = await searchOnce(key, videoId, "", pageToken, maxResults);
-      return only.resp;
-    }
-    const debug = url.searchParams.get("debug") === "1";
-    const dbg = { tagsQuery, titleQuery, categoryId, attempts: [] };
-    // Title segments: a long full title ("Song A / Song B - Artist")
-    // matches only the video itself, so the ladder also tries the first
-    // segment (usually the main song) and the artist segment.
-    const segs = titleQuery.split(/\s*[/|–—]\s*|\s+-\s+/).map(s => s.trim()).filter(s => s.length >= 2);
-    const firstSeg = segs.length > 1 ? segs[0] : "";
-    const artistSeg = segs.length > 1 ? segs[segs.length - 1] : "";
-    // Widening ladder, most specific first. An attempt wins with >= 10
-    // items; else the fullest result is used. Errors don't stop the
-    // ladder (a 429 on one query shape may not affect another). Every
-    // successful attempt is edge-cached, so page 2 re-runs the same
-    // ladder from cache and lands on the same attempt, which keeps its
-    // pageToken valid.
-    const attempts = [];
-    if (tagsQuery) attempts.push([tagsQuery, categoryId]);
-    if (titleQuery && titleQuery !== tagsQuery) attempts.push([titleQuery, categoryId]);
-    if (firstSeg && firstSeg !== titleQuery && firstSeg !== tagsQuery) attempts.push([firstSeg, categoryId]);
-    if (firstSeg) attempts.push([firstSeg, ""]);
-    if (artistSeg && artistSeg !== firstSeg && artistSeg !== titleQuery) attempts.push([artistSeg, ""]);
-    if (titleQuery && categoryId) attempts.push([titleQuery, ""]);
-    let best = null;
-    let firstError = null;
-    for (const [query, cat] of attempts) {
-      const r = await searchOnce(key, query, cat, pageToken, maxResults);
-      dbg.attempts.push({ q: query, cat, status: r.status, count: r.count });
-      if (r.count >= 10) { if (debug) return Response.json(dbg); return r.resp; }
-      if (r.count < 0) { if (!firstError) firstError = r; continue; }
-      if (!best || r.count > best.count) best = r;
-    }
-    if (debug) return Response.json(dbg);
-    return (best || firstError).resp;
+    return jsonError(502, "related unavailable");
   }
 
   if (path === "/hot") {
@@ -476,6 +505,40 @@ async function handleRequest(request) {
     if (!q) return jsonError(400, "q required");
     const maxResults = Math.min(parseInt(url.searchParams.get("maxResults") || "20", 10), 50);
     const pageToken = url.searchParams.get("pageToken");
+    // Primary source: YouTube's own search (InnerTube), normalized to
+    // the Data API shape the app parses, continuation as nextPageToken.
+    // Falls through to search.list on any doubt.
+    const cache = caches.default;
+    const cacheKey = new Request(url.toString(), { method: "GET" });
+    const hit = await cache.match(cacheKey);
+    if (hit) return hit;
+    const it = await innertubeSearch(q, pageToken);
+    if (it && it.items.length >= 5) {
+      const seen = new Set();
+      const items = [];
+      for (const item of it.items) {
+        const id = item.id.videoId;
+        if (seen.has(id)) continue;
+        seen.add(id);
+        items.push(item);
+        if (items.length >= maxResults) break;
+      }
+      if (items.length >= 5) {
+        const ttl = pageToken ? 300 : 600;
+        const resp = new Response(
+          JSON.stringify({ items, nextPageToken: it.token || null, searchSource: "innertube" }),
+          {
+            headers: {
+              "Content-Type": "application/json",
+              "Cache-Control": `public, max-age=${ttl}`,
+              "Access-Control-Allow-Origin": "*",
+            },
+          }
+        );
+        await cache.put(cacheKey, resp.clone());
+        return resp;
+      }
+    }
     let api = `${YT_BASE}/search?part=snippet&q=${encodeURIComponent(q)}&type=video&maxResults=${maxResults}&key=${key}`;
     if (pageToken) api += `&pageToken=${encodeURIComponent(pageToken)}`;
     // Search results shift; short cache to save quota (10 min)

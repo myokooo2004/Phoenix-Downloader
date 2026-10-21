@@ -259,6 +259,27 @@ object YtDlpManager {
             val response = YoutubeDL.getInstance().execute(request)
             val json = org.json.JSONObject(response.out)
 
+            // Speed (2026-10-21): this dump already carries the full
+            // formats array — seed the formats cache so the download
+            // dialog does not pay for a second extraction. The request
+            // is identical to the default-client formats attempt, so
+            // the seeded list is exactly what fetchFormats returns.
+            try {
+                val seeded = parseFormatsJson(json, null, response.err ?: "", url)
+                if (seeded.video.isNotEmpty() || seeded.music.isNotEmpty()) {
+                    synchronized(formatsCache) {
+                        formatsCache[url] =
+                            CachedFormats(seeded, System.currentTimeMillis())
+                    }
+                    logNote(
+                        "fetchVideoInfo.seed",
+                        "formats cached url=$url video=${seeded.video.size} audio=${seeded.music.size}"
+                    )
+                }
+            } catch (e: Exception) {
+                logNote("fetchVideoInfo.seed", "seed failed url=$url: ${e.message}")
+            }
+
             Result.success(
                 VideoInfo(
                     url = url,
@@ -294,7 +315,13 @@ object YtDlpManager {
         }
         try {
             if (!isReady()) return@withContext Result.failure(Exception(notReadyReason()))
-            ensureUpdated()
+            // Speed (2026-10-21): do not block the dialog on the yt-dlp
+            // self-update. It already runs in the background from init;
+            // firing it here too (mutex-guarded, once per session)
+            // keeps the trigger without making a session's first fetch
+            // wait on a slow network. The baked-in yt-dlp is the latest
+            // stable, so proceeding at once never runs an old version.
+            managerScope.launch { ensureUpdated() }
             val clients = listOf<String?>(null, "tv", "web_safari")
             var lastError: Exception? = null
             for (client in clients) {
@@ -330,7 +357,21 @@ object YtDlpManager {
             request.addOption("--no-download")
             val response = YoutubeDL.getInstance().execute(request)
             val json = org.json.JSONObject(response.out)
+            parseFormatsJson(json, client, response.err ?: "", url)
+        }
 
+    /**
+     * Parse one --dump-json extraction's formats array into the
+     * dialog's music/video lists. Shared by fetchFormatsOnce and by
+     * fetchVideoInfo's cache seeding (speed fix 2026-10-21: one
+     * extraction serves info + dialog instead of two).
+     */
+    private fun parseFormatsJson(
+        json: org.json.JSONObject,
+        client: String?,
+        errText: String,
+        url: String
+    ): FormatsResult {
             val music = mutableListOf<FormatOption>()
             // ONE video format per quality tier (user rule): the best at each
             // height, MP4 sources preferred, then the largest file.
@@ -389,7 +430,6 @@ object YtDlpManager {
             val sortedVideo = bestByHeight.values.sortedBy {
                 it.label.filter { c -> c.isDigit() }.toIntOrNull() ?: 0
             }
-            val errText = response.err ?: ""
             val poNote = when {
                 errText.contains("PO Token", ignoreCase = true) -> " PO-TOKEN-warning"
                 errText.contains("skipped", ignoreCase = true) -> " skipped-formats"
@@ -403,13 +443,13 @@ object YtDlpManager {
                     sortedVideo.joinToString(", ") { "${it.label}/${it.format}/${it.id}" } +
                     "] audio=${music.size}$poNote"
             )
-            FormatsResult(
+            return FormatsResult(
                 music = music,
                 video = sortedVideo,
                 maxHeight = maxHeight,
                 clientUsed = client
             )
-        }
+    }
 
     /**
      * Resolve ONE direct playable URL (video + audio together) for ExoPlayer.
