@@ -8,8 +8,15 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
+import java.net.InetAddress
 import java.net.URL
 import java.net.URLEncoder
+import java.util.concurrent.TimeUnit
+import okhttp3.Dns
+import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.dnsoverhttps.DnsOverHttps
 
 /**
  * YouTube Data API v3 client for trending videos.
@@ -23,6 +30,60 @@ object YouTubeApiClient {
     // Legacy direct API (kept for reference; not used)
     private const val API_KEY = "AIzaSyDVpveH9BzSa7QZh7QT7Uh2zMasfEWR8Pw"
     private const val BASE_URL = "https://www.googleapis.com/youtube/v3/videos"
+
+    // --- Worker transport --------------------------------------------------
+    // Field evidence (2026-10-21): on the user's MPT line the system DNS
+    // returns a poisoned/restricted answer for the Worker host (a single
+    // connection-blocked Cloudflare IP), so every Worker call is reset
+    // unless a VPN is on. Chrome reaches the host because its Secure DNS
+    // gets the full honest record set. Do the same here: resolve the
+    // Worker host via DNS-over-HTTPS on port 443 (Cloudflare), with the
+    // resolver's own IPs as bootstrap so no system DNS is needed for it.
+    // If DoH itself fails, fall back to the system resolver — the app is
+    // then exactly as reachable as before, never worse.
+    private val dohDns: Dns = DnsOverHttps.Builder()
+        .client(OkHttpClient())
+        .url("https://cloudflare-dns.com/dns-query".toHttpUrl())
+        .bootstrapDnsHosts(
+            InetAddress.getByName("1.1.1.1"),
+            InetAddress.getByName("1.0.0.1"),
+            InetAddress.getByName("2606:4700:4700::1111"),
+            InetAddress.getByName("2606:4700:4700::1001")
+        )
+        .build()
+
+    private val workerDns = object : Dns {
+        override fun lookup(hostname: String): List<InetAddress> =
+            try {
+                dohDns.lookup(hostname)
+            } catch (e: Exception) {
+                Log.w(TAG, "DoH lookup failed for $hostname; system DNS fallback", e)
+                Dns.SYSTEM.lookup(hostname)
+            }
+    }
+
+    private val workerClient: OkHttpClient = OkHttpClient.Builder()
+        .dns(workerDns)
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(15, TimeUnit.SECONDS)
+        .build()
+
+    /**
+     * GET [urlStr] through the DoH-backed client. Returns (status, body);
+     * on a non-200 the body is the error body, matching what callers used
+     * to read from HttpURLConnection.errorStream. Transport failures throw
+     * (callers' existing try/catch and IOException retry logic rely on it).
+     */
+    private fun workerGet(urlStr: String, timeoutMs: Long = 15000L): Pair<Int, String> {
+        val client = workerClient.newBuilder()
+            .connectTimeout(timeoutMs, TimeUnit.MILLISECONDS)
+            .readTimeout(timeoutMs, TimeUnit.MILLISECONDS)
+            .build()
+        val request = Request.Builder().url(urlStr).get().build()
+        client.newCall(request).execute().use { response ->
+            return response.code to (response.body?.string() ?: "")
+        }
+    }
 
     /**
      * Fetch trending videos for a region.
@@ -38,20 +99,12 @@ object YouTubeApiClient {
             if (pageToken != null) {
                 urlStr += "&pageToken=$pageToken"
             }
-            val url = URL(urlStr)
-            val conn = url.openConnection() as HttpURLConnection
-            conn.requestMethod = "GET"
-            conn.connectTimeout = 15000
-            conn.readTimeout = 15000
-
-            val code = conn.responseCode
+            val (code, body) = workerGet(urlStr)
             if (code != 200) {
-                val err = try { conn.errorStream?.bufferedReader()?.readText() } catch (e: Exception) { null }
-                Log.e(TAG, "API error $code: $err")
+                Log.e(TAG, "API error $code: $body")
                 return@withContext Result.failure(Exception("YouTube API error: $code"))
             }
 
-            val body = conn.inputStream.bufferedReader().readText()
             val json = JSONObject(body)
             val nextPageToken = json.optString("nextPageToken", null)
             val items = json.getJSONArray("items")
@@ -143,20 +196,12 @@ object YouTubeApiClient {
             if (!pageToken.isNullOrEmpty()) {
                 urlStr += "&pageToken=${java.net.URLEncoder.encode(pageToken, "UTF-8")}"
             }
-            val url = URL(urlStr)
-            val conn = url.openConnection() as HttpURLConnection
-            conn.requestMethod = "GET"
-            conn.connectTimeout = 15000
-            conn.readTimeout = 15000
-
-            val code = conn.responseCode
+            val (code, body) = workerGet(urlStr)
             if (code != 200) {
-                val errorBody = try { conn.errorStream?.bufferedReader()?.readText() ?: "" } catch (e: Exception) { "" }
-                Log.e(TAG, "searchVideos API error $code: $errorBody")
-                return@withContext Result.failure(Exception("YouTube API error: $code - $errorBody"))
+                Log.e(TAG, "searchVideos API error $code: $body")
+                return@withContext Result.failure(Exception("YouTube API error: $code - $body"))
             }
 
-            val body = conn.inputStream.bufferedReader().readText()
             val json = JSONObject(body)
             val nextToken = json.optString("nextPageToken", "").ifEmpty { null }
             val items = json.optJSONArray("items") ?: org.json.JSONArray()
@@ -232,20 +277,12 @@ object YouTubeApiClient {
             if (!pageToken.isNullOrEmpty()) {
                 urlStr += "&pageToken=${java.net.URLEncoder.encode(pageToken, "UTF-8")}"
             }
-            val url = URL(urlStr)
-            val conn = url.openConnection() as HttpURLConnection
-            conn.requestMethod = "GET"
-            conn.connectTimeout = 15000
-            conn.readTimeout = 15000
-
-            val code = conn.responseCode
+            val (code, body) = workerGet(urlStr)
             if (code != 200) {
-                val errorBody = try { conn.errorStream?.bufferedReader()?.readText() ?: "" } catch (e: Exception) { "" }
-                Log.e(TAG, "getRelatedVideos API error $code: $errorBody")
-                return@withContext Result.failure(Exception("YouTube API error: $code - $errorBody"))
+                Log.e(TAG, "getRelatedVideos API error $code: $body")
+                return@withContext Result.failure(Exception("YouTube API error: $code - $body"))
             }
 
-            val body = conn.inputStream.bufferedReader().readText()
             val json = JSONObject(body)
             val nextToken = json.optString("nextPageToken", "").ifEmpty { null }
             val items = json.getJSONArray("items")
@@ -296,20 +333,12 @@ object YouTubeApiClient {
             val urlStr = "$WORKER_BASE/comments" +
                     "?videoId=$videoId" +
                     "&maxResults=${maxResults.coerceIn(1, 100)}"
-            val url = URL(urlStr)
-            val conn = url.openConnection() as HttpURLConnection
-            conn.requestMethod = "GET"
-            conn.connectTimeout = 15000
-            conn.readTimeout = 15000
-
-            val code = conn.responseCode
+            val (code, body) = workerGet(urlStr)
             if (code != 200) {
-                val errorBody = try { conn.errorStream?.bufferedReader()?.readText() ?: "" } catch (e: Exception) { "" }
-                Log.e(TAG, "getComments API error $code: $errorBody")
-                return@withContext Result.failure(Exception("YouTube API error: $code - $errorBody"))
+                Log.e(TAG, "getComments API error $code: $body")
+                return@withContext Result.failure(Exception("YouTube API error: $code - $body"))
             }
 
-            val body = conn.inputStream.bufferedReader().readText()
             val json = JSONObject(body)
             val items = json.getJSONArray("items")
             val comments = mutableListOf<CommentItem>()
@@ -390,11 +419,9 @@ object YouTubeApiClient {
      */
     suspend fun fetchHotSearches(): List<String> = withContext(Dispatchers.IO) {
         try {
-            val conn = URL("$WORKER_BASE/hot").openConnection() as HttpURLConnection
-            conn.connectTimeout = 8000
-            conn.readTimeout = 8000
-            if (conn.responseCode != 200) return@withContext emptyList()
-            val arr = JSONObject(conn.inputStream.bufferedReader().readText()).optJSONArray("terms")
+            val (code, body) = workerGet("$WORKER_BASE/hot", 8000L)
+            if (code != 200) return@withContext emptyList()
+            val arr = JSONObject(body).optJSONArray("terms")
                 ?: return@withContext emptyList()
             (0 until arr.length()).map { arr.optString(it) }.filter { it.isNotBlank() }
         } catch (e: Exception) {
