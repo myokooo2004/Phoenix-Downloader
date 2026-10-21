@@ -36,6 +36,13 @@ class BrowserFragment : Fragment() {
     private val binding get() = _binding!!
     private var pendingVideoUrl: String? = null
 
+    // Video-tap interception state (see shouldOverrideUrlLoading): the
+    // in-flight info fetch (self-clears when the view is destroyed, since
+    // it runs in the view lifecycle scope) and the last intercepted URL.
+    private var detailFetchJob: kotlinx.coroutines.Job? = null
+    private var lastInterceptUrl: String? = null
+    private var lastInterceptAt: Long = 0L
+
     override fun onCreateView(
         inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?
     ): View {
@@ -89,27 +96,41 @@ class BrowserFragment : Fragment() {
         // related), same as tapping a video on Home (user spec 2026-10-20).
         binding.tvDetectHint.setOnClickListener {
             val url = pendingVideoUrl ?: return@setOnClickListener
-            viewLifecycleOwner.lifecycleScope.launch {
-                YtDlpManager.fetchVideoInfo(url)
-                    .onSuccess { info ->
-                        (activity as? MainActivity)?.openVideoDetail(
-                            info.url, info.title,
-                            info.thumbnailUrl ?: "", info.durationSec.toInt()
-                        )
-                    }
-                    .onFailure {
-                        android.widget.Toast.makeText(
-                            requireContext(),
-                            it.message ?: "Could not fetch video",
-                            android.widget.Toast.LENGTH_SHORT
-                        ).show()
-                    }
+            openDetailFor(url) { e ->
+                android.widget.Toast.makeText(
+                    requireContext(),
+                    e.message ?: "Could not fetch video",
+                    android.widget.Toast.LENGTH_SHORT
+                ).show()
             }
         }
 
         wv.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
-                return false // stay inside this WebView
+                // VidMate-style entry (user, 2026-10-21): a TAP on a video
+                // link opens our detail page (pinned player + red Download)
+                // instead of loading the site's watch page, which has no
+                // download button at all. Stability guards, so the page
+                // never "jumps out" on its own:
+                //  - main-frame + real user gesture only; redirects and
+                //    SPA pushState navigations are NOT intercepted
+                //    (doUpdateVisitedHistory is deliberately not hooked,
+                //    so in-page autoplay/next never yanks the user out)
+                //  - only URLs UrlDetector knows are video pages
+                //  - one info fetch in flight at a time; the same URL is
+                //    latched for 3s so a double-fire opens one page only
+                //  - fetch failure -> the WebView loads the page as before
+                val target = request.url?.toString() ?: return false
+                if (!request.isForMainFrame || !request.hasGesture()) return false
+                if (UrlDetector.detect(target) == null) return false
+                if (target == view.url) return false
+                if (detailFetchJob?.isActive == true) return true
+                val now = android.os.SystemClock.uptimeMillis()
+                if (target == lastInterceptUrl && now - lastInterceptAt < 3000) return true
+                lastInterceptUrl = target
+                lastInterceptAt = now
+                openDetailFor(target) { view.loadUrl(target) }
+                return true
             }
 
             override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
@@ -196,6 +217,25 @@ class BrowserFragment : Fragment() {
         }
     }
 
+    /**
+     * Shared path for the "Video detected" pill and for video-link tap
+     * interception: fetch the video's info, then open the detail page
+     * (pinned player + red Download + related). [onFetchFail] decides
+     * what a failure means for each entry point.
+     */
+    private fun openDetailFor(url: String, onFetchFail: (Throwable) -> Unit) {
+        detailFetchJob = viewLifecycleOwner.lifecycleScope.launch {
+            YtDlpManager.fetchVideoInfo(url)
+                .onSuccess { info ->
+                    (activity as? MainActivity)?.openVideoDetail(
+                        info.url, info.title,
+                        info.thumbnailUrl ?: "", info.durationSec.toInt()
+                    )
+                }
+                .onFailure { e -> onFetchFail(e) }
+        }
+    }
+
     private fun checkForVideo(url: String) {
         val site = UrlDetector.detect(url)
         pendingVideoUrl = if (site != null) url else null
@@ -213,7 +253,9 @@ class BrowserFragment : Fragment() {
         // diagnostics so the crash log shows exactly what the DOM contained.
         //
         // Placement/style (user, 2026-10-20, from their reference screenshot):
-        // a small plain outline ⬇ icon at the bottom-right of each video
+        // a plain outline ⬇ icon at the bottom-right of each video
+        // (enlarged 2026-10-21 per user — 40px box, 24px glyph; it read
+        // as too small in the field)
         // ITEM (next to the item's ⋮ menu) — NOT a red circle floating on
         // the thumbnail, and never on the player/header. The host is the
         // list-item renderer itself (no parent fallback), it must contain
@@ -281,9 +323,9 @@ class BrowserFragment : Fragment() {
                                 btn.setAttribute('data-phoenix-btn', '1');
                                 btn.setAttribute('data-vid', vid);
                                 btn.textContent = '⬇';
-                                btn.style.cssText = 'position:absolute;right:30px;bottom:4px;width:32px;height:32px;' +
+                                btn.style.cssText = 'position:absolute;right:30px;bottom:4px;width:40px;height:40px;' +
                                     'color:#616161;display:flex;align-items:center;justify-content:center;' +
-                                    'font-size:19px;z-index:9999;cursor:pointer;background:transparent;';
+                                    'font-size:24px;z-index:9999;cursor:pointer;background:transparent;';
                                 btn.addEventListener('click', function(e) {
                                     e.stopPropagation();
                                     e.preventDefault();
