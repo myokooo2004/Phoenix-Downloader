@@ -322,11 +322,11 @@ async function handleRequest(request) {
 
   if (path === "/trending.json") {
     // Normalized trending for the GitHub mirror: scripts/refresh_
-    // trending.py republishes this to the repo's data branch hourly and
-    // the app reads it from raw.githubusercontent.com, which stays
-    // reachable on networks that block this Worker's hosts (the app then
-    // needs no VPN for Home). Same upstream data as /trending, flattened
-    // to {videos:[{url,title,thumbnailUrl,duration}],nextPageToken} with
+    // trending.py republishes this to the repo's data branch every
+    // 6h and the app reads it from raw.githubusercontent.com, which
+    // stays reachable on networks that block this Worker's hosts
+    // (the app then needs no VPN for Home). MM is InnerTube-sourced
+    // (see below); other regions flatten the Data API chart with
     // durations resolved via one videos.list contentDetails call.
     const cache = caches.default;
     const cacheKey = new Request(url.toString(), { method: "GET" });
@@ -335,6 +335,60 @@ async function handleRequest(request) {
     const region = url.searchParams.get("region") || "MM";
     const maxResults = Math.min(parseInt(url.searchParams.get("maxResults") || "20", 10), 50);
     const pageToken = url.searchParams.get("pageToken");
+    if (region === "MM") {
+      // Source: InnerTube search for "Myanmar music" (Option A, user
+      // 2026-10-21) — ZERO Data API quota. The Data API search.list
+      // chain cost ~500 units per mirror refresh (~2,000/day) and
+      // exhausted the project once; durations ride on the InnerTube
+      // items, so the videos.list batch call is gone too. Same output
+      // shape as before. The refresh script's publish gate (>= 40
+      // validated videos, else keep the previous file) is what makes
+      // a private-API source safe to depend on. (gl:"MM" was A/B
+      // tested 2026-10-21: it returns ZERO items — the shared US
+      // context stays.)
+      const it = await innertubeSearch("Myanmar music", pageToken);
+      if (it && it.items.length) {
+        const videos = [];
+        for (const item of it.items) {
+          const id = item.id.videoId;
+          const sn = item.snippet || {};
+          if (!id || !sn.title) continue;
+          const th = sn.thumbnails || {};
+          videos.push({
+            url: `https://www.youtube.com/watch?v=${id}`,
+            title: sn.title,
+            thumbnailUrl: (th.high && th.high.url) || (th.medium && th.medium.url) || (th.default && th.default.url) || "",
+            duration: item.durationSec || 0,
+          });
+        }
+        if (videos.length) {
+          const resp = new Response(
+            JSON.stringify({ videos, nextPageToken: it.token || null }),
+            {
+              headers: {
+                "Content-Type": "application/json",
+                "Cache-Control": "public, max-age=3600",
+                "Access-Control-Allow-Origin": "*",
+              },
+            }
+          );
+          await cache.put(cacheKey, resp.clone());
+          return resp;
+        }
+      }
+      // InnerTube gave nothing: an empty page, deliberately NOT
+      // cached — the refresh gate fails the run and the previous
+      // mirror file stays live.
+      return new Response(
+        JSON.stringify({ videos: [], nextPageToken: null }),
+        {
+          headers: {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+          },
+        }
+      );
+    }
     let api;
     if (region === "MM") {
       api = `${YT_BASE}/search?part=snippet&q=${encodeURIComponent("Myanmar music")}&type=video&maxResults=${maxResults}&key=${key}`;

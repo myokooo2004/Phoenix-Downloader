@@ -2,10 +2,11 @@ name: Refresh trending feed
 
 # Keeps the data branch's trending.json fresh: the app reads Home's
 # trending list from raw.githubusercontent.com (reachable without a VPN
-# where the API Worker's hosts are blocked). Every 6 hours is deliberate
-# quota discipline — each refresh chains 5 search.list pages (~500
-# units) via the Worker; more frequent runs would starve /related and
-# /search, which share the same daily quota.
+# where the API Worker's hosts are blocked). Every 6 hours: the Worker
+# source is InnerTube (zero API quota since 2026-10-21), so the cadence
+# is a freshness choice, not quota discipline. The refresh script's
+# publish gate (>= 40 validated videos) fails the run — and keeps the
+# previous file — if the upstream parse ever looks broken.
 on:
   schedule:
     - cron: "17 */6 * * *"
