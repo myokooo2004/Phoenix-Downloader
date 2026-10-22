@@ -174,63 +174,104 @@ class DownloadDialogFragment : DialogFragment() {
         }
     }
 
+    private var shownMaxHeight = -1
+    private var shownTierCount = -1
+
     private fun fetchFormats() {
         binding.tvFetching.visibility = View.VISIBLE
         lifecycleScope.launch {
+            // Stage 1 (2026-10-22): the /player metadata list — one
+            // cheap call, so the dialog is usable in ~1-3s instead of
+            // waiting for a full extraction (~17s in the field).
+            var shown = false
+            val fast = try {
+                YtDlpManager.fetchFormatsFast(videoUrl)
+            } catch (e: Exception) {
+                null
+            }
+            if (_binding == null) return@launch
+            if (fast != null && fast.video.isNotEmpty()) {
+                renderFormats(fast)
+                shown = true
+                binding.tvFetching.visibility = View.GONE
+            }
+            // Stage 2: the authoritative yt-dlp extraction. When it
+            // knows more than the advisory list (a real 4K tier, more
+            // tiers), the list upgrades in place.
             val result = YtDlpManager.fetchFormats(videoUrl)
+            if (_binding == null) return@launch
             binding.tvFetching.visibility = View.GONE
-            result.onSuccess { formatsResult ->
-                formatsClient = formatsResult.clientUsed
-                // Build ONE row list: section headers + entries.
-                val rows = mutableListOf<FormatRow>()
-                rows.add(FormatRow.Section("🎵 " + getString(com.phoenix.downloader.R.string.section_music)))
-                rows.add(FormatRow.Entry(FormatInfo("MP3_128", "128K (MP3)", "~3MB", true), 0, "MP3"))
-                rows.add(FormatRow.Entry(FormatInfo("MP3_192", "192K (MP3)", "~5MB", true), 0, "MP3"))
-                rows.add(FormatRow.Entry(FormatInfo("MP3_320", "320K (MP3)", "~8MB", true), 0, "MP3"))
-                rows.add(FormatRow.Section("🎬 " + getString(com.phoenix.downloader.R.string.section_video)))
-                var firstVideoEntryIndex = -1
-                // User rule: no video options below 360p. If the video ONLY
-                // exists below 360p, show those rather than nothing.
-                val hdFormats = formatsResult.video.filter { f ->
-                    (f.label.filter { c -> c.isDigit() }.toIntOrNull() ?: 0) >= 360
-                }
-                val shownFormats = hdFormats.ifEmpty { formatsResult.video }
-                // Video list arrives already collapsed to ONE format per
-                // quality tier (best, MP4 preferred) from YtDlpManager.
-                // User rule: MP4 output only — no MKV offers.
-                for (f in shownFormats) {
-                    val height = f.label.filter { c -> c.isDigit() }.toIntOrNull() ?: 0
-                    if (firstVideoEntryIndex < 0) firstVideoEntryIndex = rows.size
-                    rows.add(FormatRow.Entry(FormatInfo(f.id, "${f.label} (MP4)", f.sizeLabel, false), height, "MP4"))
-                }
-                if (formatsResult.video.isEmpty()) {
+            result.onSuccess { full ->
+                // Upgrade only — never downgrade a richer advisory list.
+                val better = full.maxHeight > shownMaxHeight ||
+                    (full.video.size > shownTierCount && full.maxHeight >= shownMaxHeight)
+                if (!shown || better) renderFormats(full)
+                if (full.video.isEmpty() && !shown) {
                     Toast.makeText(requireContext(), "No formats found", Toast.LENGTH_SHORT).show()
-                    return@onSuccess
-                }
-                val adapter = FormatListAdapter(rows) { entry ->
-                    selectedFormatId = entry.info.id
-                    selectedHeight = entry.height
-                    selectedContainer = entry.container
-                    binding.btnDownload.isEnabled = true
-                    binding.btnDownload.alpha = 1f
-                }
-                val glm = GridLayoutManager(requireContext(), 2)
-                glm.spanSizeLookup = FormatListAdapter.spanSizeLookup(adapter)
-                binding.rvFormats.layoutManager = glm
-                binding.rvFormats.adapter = adapter
-                // Default selection: first video format (VidMate-style).
-                if (firstVideoEntryIndex >= 0) {
-                    adapter.preselect(firstVideoEntryIndex)
-                    val first = rows[firstVideoEntryIndex] as FormatRow.Entry
-                    selectedFormatId = first.info.id
-                    selectedHeight = first.height
-                    selectedContainer = first.container
-                    binding.btnDownload.isEnabled = true
-                    binding.btnDownload.alpha = 1f
                 }
             }.onFailure {
-                Toast.makeText(requireContext(), "Failed: ${it.message}", Toast.LENGTH_SHORT).show()
+                if (!shown) {
+                    Toast.makeText(requireContext(), "Failed: ${it.message}", Toast.LENGTH_SHORT).show()
+                }
             }
+        }
+    }
+
+    /** Render one format list (advisory or authoritative) into the grid. */
+    private fun renderFormats(formatsResult: YtDlpManager.FormatsResult) {
+        if (formatsResult.video.isEmpty()) return
+        formatsClient = formatsResult.clientUsed
+        shownMaxHeight = formatsResult.maxHeight
+        shownTierCount = formatsResult.video.size
+        // Build ONE row list: section headers + entries.
+        val rows = mutableListOf<FormatRow>()
+        rows.add(FormatRow.Section("🎵 " + getString(com.phoenix.downloader.R.string.section_music)))
+        rows.add(FormatRow.Entry(FormatInfo("MP3_128", "128K (MP3)", "~3MB", true), 0, "MP3"))
+        rows.add(FormatRow.Entry(FormatInfo("MP3_192", "192K (MP3)", "~5MB", true), 0, "MP3"))
+        rows.add(FormatRow.Entry(FormatInfo("MP3_320", "320K (MP3)", "~8MB", true), 0, "MP3"))
+        rows.add(FormatRow.Section("🎬 " + getString(com.phoenix.downloader.R.string.section_video)))
+        var firstVideoEntryIndex = -1
+        var keepHeightIndex = -1
+        // User rule: no video options below 360p. If the video ONLY
+        // exists below 360p, show those rather than nothing.
+        val hdFormats = formatsResult.video.filter { f ->
+            (f.label.filter { c -> c.isDigit() }.toIntOrNull() ?: 0) >= 360
+        }
+        val shownFormats = hdFormats.ifEmpty { formatsResult.video }
+        // Video list arrives already collapsed to ONE format per
+        // quality tier (best, MP4 preferred) from YtDlpManager.
+        // User rule: MP4 output only — no MKV offers.
+        for (f in shownFormats) {
+            val height = f.label.filter { c -> c.isDigit() }.toIntOrNull() ?: 0
+            if (firstVideoEntryIndex < 0) firstVideoEntryIndex = rows.size
+            if (selectedHeight > 0 && height == selectedHeight && keepHeightIndex < 0) {
+                keepHeightIndex = rows.size
+            }
+            rows.add(FormatRow.Entry(FormatInfo(f.id, "${f.label} (MP4)", f.sizeLabel, false), height, "MP4"))
+        }
+        val adapter = FormatListAdapter(rows) { entry ->
+            selectedFormatId = entry.info.id
+            selectedHeight = entry.height
+            selectedContainer = entry.container
+            binding.btnDownload.isEnabled = true
+            binding.btnDownload.alpha = 1f
+        }
+        val glm = GridLayoutManager(requireContext(), 2)
+        glm.spanSizeLookup = FormatListAdapter.spanSizeLookup(adapter)
+        binding.rvFormats.layoutManager = glm
+        binding.rvFormats.adapter = adapter
+        // Default selection: on an upgrade re-render, keep the tier the
+        // user already picked; otherwise the first video format
+        // (VidMate-style).
+        val preselectIndex = if (keepHeightIndex >= 0) keepHeightIndex else firstVideoEntryIndex
+        if (preselectIndex >= 0) {
+            adapter.preselect(preselectIndex)
+            val first = rows[preselectIndex] as FormatRow.Entry
+            selectedFormatId = first.info.id
+            selectedHeight = first.height
+            selectedContainer = first.container
+            binding.btnDownload.isEnabled = true
+            binding.btnDownload.alpha = 1f
         }
     }
 

@@ -79,6 +79,42 @@ class BrowserFragment : Fragment() {
             }
 
             @android.webkit.JavascriptInterface
+            fun onActionClick(action: String, videoUrl: String) {
+                // The injected watch-page action bar (Save / Popup /
+                // Play Audio / Share / Download). Download and Play
+                // Audio open the download dialog; Share uses the
+                // system share sheet; Save/Popup are placeholders,
+                // same as on the native detail page.
+                activity?.runOnUiThread {
+                    when (action) {
+                        "download", "audio" -> onDownloadClick(videoUrl)
+                        "share" -> {
+                            try {
+                                val send = android.content.Intent(
+                                    android.content.Intent.ACTION_SEND
+                                ).apply {
+                                    type = "text/plain"
+                                    putExtra(android.content.Intent.EXTRA_TEXT, videoUrl)
+                                }
+                                activity?.startActivity(
+                                    android.content.Intent.createChooser(send, null)
+                                )
+                            } catch (e: Exception) { /* no share target */ }
+                        }
+                        else -> {
+                            val label = if (action == "save") "Save" else "Popup"
+                            context?.let { ctx ->
+                                android.widget.Toast.makeText(
+                                    ctx, "$label — coming soon",
+                                    android.widget.Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                        }
+                    }
+                }
+            }
+
+            @android.webkit.JavascriptInterface
             fun reportDiag(json: String) {
                 try {
                     val ctx = activity?.applicationContext ?: return
@@ -133,6 +169,8 @@ class BrowserFragment : Fragment() {
                 } catch (e: Exception) { /* ignore */ }
                 // Inject Vidmate-style per-video download buttons
                 injectDownloadButtons(view)
+                // Inject our action bar on YouTube watch pages
+                injectWatchActions(view)
             }
 
             override fun doUpdateVisitedHistory(view: WebView, url: String, isReload: Boolean) {
@@ -141,6 +179,7 @@ class BrowserFragment : Fragment() {
                 checkForVideo(url)
                 // Re-inject per-video download buttons after SPA navigation
                 injectDownloadButtons(view)
+                injectWatchActions(view)
             }
         }
         wv.webChromeClient = object : WebChromeClient() {
@@ -204,7 +243,11 @@ class BrowserFragment : Fragment() {
         pendingVideoUrl = if (site != null) url else null
         // FAB disabled - user wants per-video buttons only, not FAB
         binding.fabDownload.isVisible = false
-        binding.tvDetectHint.isVisible = pendingVideoUrl != null
+        // On YouTube watch pages the injected action bar (big red
+        // Download) is the download path, so the pill stays hidden
+        // there; on Shorts / Facebook / TikTok the pill remains it.
+        val hasActionBar = site == UrlDetector.Site.YOUTUBE && url.contains("/watch")
+        binding.tvDetectHint.isVisible = pendingVideoUrl != null && !hasActionBar
         // Pre-warm formats for the detected watch page (dialog opens fast).
         if (pendingVideoUrl != null) YtDlpManager.prewarmFormats(url)
     }
@@ -366,6 +409,124 @@ class BrowserFragment : Fragment() {
                     com.phoenix.downloader.core.CrashLogger.logNonFatal(
                         ctx,
                         "BrowserButtons",
+                        Exception("inject result=$result url=${webView.url}")
+                    )
+                }
+            } catch (e: Exception) { /* diagnostics only */ }
+        }
+    }
+
+    /**
+     * Inject OUR action bar into YouTube watch pages (user spec
+     * 2026-10-22, from their VidMate screenshots): Save / Popup /
+     * Play Audio / Share / Download — with Download big and red at
+     * the right end, sitting under the video's own metadata like the
+     * detail-page action row did. CEIR-extension model: the page is
+     * YouTube's; this bar is our overlay inside it. Clicks ride the
+     * PhoenixDownloader bridge (onActionClick). The bar re-anchors
+     * itself on SPA navigations (it keys on the current video id),
+     * and reports which anchor matched to the crash log so the field
+     * can verify placement.
+     */
+    private fun injectWatchActions(webView: WebView) {
+        val js = """
+            (function() {
+                try {
+                    var stats = window._phxBar || (window._phxBar = {added: 0, rebuilt: 0});
+                    function currentVid() {
+                        var m = location.href.match(/[?&]v=([\w-]{11})/);
+                        return m ? m[1] : null;
+                    }
+                    function svgStroke(inner) {
+                        return '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#0f0f0f" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' + inner + '</svg>';
+                    }
+                    function svgShare() {
+                        return '<svg viewBox="0 0 24 24" width="24" height="24" fill="#0f0f0f"><path d="M13 4.5L21 12l-8 7.5v-4.2c-5-.3-7.7 1.4-9.6 4.4.3-6.4 3.4-10.3 9.6-11.4z"/></svg>';
+                    }
+                    function svgDownload() {
+                        return '<svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="#e62117" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v11"/><path d="M6.5 9.5L12 15l5.5-5.5"/><path d="M4 20h16"/></svg>';
+                    }
+                    function cell(action, icon, label, color) {
+                        var d = document.createElement('div');
+                        d.setAttribute('data-phx-action', action);
+                        d.style.cssText = 'flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:4px 0;cursor:pointer;';
+                        d.innerHTML = icon + '<span style="font-size:11px;color:' + color + ';' + (action === 'download' ? 'font-weight:700;' : '') + '">' + label + '</span>';
+                        d.addEventListener('click', function(e) {
+                            e.stopPropagation();
+                            e.preventDefault();
+                            var v = currentVid();
+                            if (v && window.PhoenixDownloader && PhoenixDownloader.onActionClick) {
+                                PhoenixDownloader.onActionClick(action, 'https://www.youtube.com/watch?v=' + v);
+                            }
+                        }, true);
+                        return d;
+                    }
+                    function ensure() {
+                        var vid = currentVid();
+                        if (!vid) return 'no-vid';
+                        if (location.href.indexOf('/watch') < 0) return 'not-watch';
+                        var bar = document.getElementById('phoenix-action-bar');
+                        if (bar && bar.getAttribute('data-vid') === vid) return 'exists';
+                        if (bar) { bar.remove(); stats.rebuilt++; }
+                        var anchorAfter = null, anchorBefore = null, how = '';
+                        var info = document.querySelector('ytm-slim-video-information-renderer');
+                        if (info) { anchorAfter = info; how = 'info'; }
+                        if (!anchorAfter) {
+                            var like = document.querySelector('ytm-like-button-renderer, ytm-segmented-like-dislike-button-renderer');
+                            if (like && like.parentElement) { anchorAfter = like.parentElement; how = 'like-parent'; }
+                        }
+                        if (!anchorAfter) {
+                            var comments = document.querySelector('ytm-comments-entry-point-header-renderer, ytm-comment-section-renderer');
+                            if (comments) { anchorBefore = comments; how = 'comments'; }
+                        }
+                        if (!anchorAfter && !anchorBefore) return 'no-anchor';
+                        bar = document.createElement('div');
+                        bar.id = 'phoenix-action-bar';
+                        bar.setAttribute('data-vid', vid);
+                        bar.style.cssText = 'display:flex;align-items:flex-start;background:#ffffff;border-top:1px solid #e5e5e5;border-bottom:1px solid #e5e5e5;padding:8px 6px;margin:6px 0;position:relative;z-index:50;';
+                        bar.appendChild(cell('save', svgStroke('<rect x="5" y="4" width="14" height="17" rx="2"/><path d="M12 8v6"/><path d="M9 11l3 3 3-3"/>'), 'Save', '#0f0f0f'));
+                        bar.appendChild(cell('popup', svgStroke('<rect x="8" y="9" width="12" height="11" rx="2"/><path d="M16 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>'), 'Popup', '#0f0f0f'));
+                        bar.appendChild(cell('audio', svgStroke('<path d="M4 16v-3a8 8 0 0 1 16 0v3"/><rect x="3" y="15" width="4" height="6" rx="2"/><rect x="17" y="15" width="4" height="6" rx="2"/>'), 'Play Audio', '#0f0f0f'));
+                        bar.appendChild(cell('share', svgShare(), 'Share', '#0f0f0f'));
+                        bar.appendChild(cell('download', svgDownload(), 'Download', '#e62117'));
+                        if (anchorBefore) {
+                            anchorBefore.parentNode.insertBefore(bar, anchorBefore);
+                        } else {
+                            anchorAfter.parentNode.insertBefore(bar, anchorAfter.nextSibling);
+                        }
+                        stats.added++;
+                        try {
+                            if (window.PhoenixDownloader && PhoenixDownloader.reportDiag) {
+                                PhoenixDownloader.reportDiag(JSON.stringify({bar: 'added', how: how, vid: vid, stats: stats}));
+                            }
+                        } catch (e) {}
+                        return 'added-' + how;
+                    }
+                    var r = ensure();
+                    var tries = 0;
+                    var timer = setInterval(function() {
+                        tries++;
+                        ensure();
+                        if (tries >= 12) clearInterval(timer);
+                    }, 1000);
+                    if (!window._phoenixBarObserver && document.body) {
+                        try {
+                            window._phoenixBarObserver = new MutationObserver(function() { ensure(); });
+                            window._phoenixBarObserver.observe(document.body, { childList: true, subtree: true });
+                        } catch (e) {}
+                    }
+                    return JSON.stringify({bar: r, stats: stats});
+                } catch (e) {
+                    return JSON.stringify({bar: 'err', err: 'outer: ' + (e && e.message || e)});
+                }
+            })();
+        """.trimIndent()
+        webView.evaluateJavascript(js) { result ->
+            try {
+                webView.context?.let { ctx ->
+                    com.phoenix.downloader.core.CrashLogger.logNonFatal(
+                        ctx,
+                        "BrowserActions",
                         Exception("inject result=$result url=${webView.url}")
                     )
                 }

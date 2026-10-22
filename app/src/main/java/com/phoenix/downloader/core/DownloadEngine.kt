@@ -376,6 +376,15 @@ object DownloadEngine {
         }
         request.addOption("-o", File(dir, "${baseName(item)}.%(ext)s").absolutePath)
         request.addOption("--no-mtime")
+        // Same persistent yt-dlp cache as the fetch path (solved
+        // signature/nsig reuse across runs).
+        try {
+            request.addOption(
+                "--cache-dir",
+                File(context.noBackupFilesDir, "ytdlp-cache").absolutePath
+            )
+        } catch (_: Exception) {
+        }
         // aria2c multi-connection: 4 connections, 4 splits (fast)
         request.addOption("--external-downloader", "aria2c")
         request.addOption("--external-downloader-args", "aria2c:-x 4 -s 4 -k 1M --summary-interval=0")
@@ -407,21 +416,33 @@ object DownloadEngine {
         } else {
             val heightSel =
                 "bestvideo[height<=${item.height}]+bestaudio/best[height<=${item.height}]"
-            attempts.add("exact" to baseRequest(context, item, dir).apply {
+            val exact = "exact" to baseRequest(context, item, dir).apply {
                 clientArg(this, item.client)
                 addOption("-f", item.formatId)
                 addOption("--merge-output-format", item.container.lowercase())
-            })
-            for ((label, client) in listOf(
+            }
+            val heights = listOf(
                 "height-tv" to "tv",
                 "height-web_safari" to "web_safari",
                 "height-default" to null
-            )) {
-                attempts.add(label to baseRequest(context, item, dir).apply {
+            ).map { (label, client) ->
+                label to baseRequest(context, item, dir).apply {
                     clientArg(this, client)
                     addOption("-f", heightSel)
                     addOption("--merge-output-format", item.container.lowercase())
-                })
+                }
+            }
+            // Picks that came from the /player metadata list carry an
+            // itag yt-dlp's own client may not offer — height intent is
+            // the contract there, so it goes first and the exact itag
+            // becomes the last resort. Extraction-sourced picks keep
+            // exact-first (their ids are authoritative).
+            if (item.client == "player-meta") {
+                attempts.addAll(heights)
+                attempts.add(exact)
+            } else {
+                attempts.add(exact)
+                attempts.addAll(heights)
             }
         }
         return attempts

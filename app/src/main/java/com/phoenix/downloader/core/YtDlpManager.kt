@@ -105,6 +105,46 @@ object YtDlpManager {
         }
     }
 
+    // ---- Advisory format list (fast, /player metadata) ----
+    // The dialog's first paint: ONE InnerTube /player call (~1-3s)
+    // instead of a full extraction (~17s measured in the field). The
+    // list is advisory — the authoritative extraction still runs
+    // (prewarm / dialog stage 2) and can upgrade it in place.
+    private data class CachedAdvisory(val result: FormatsResult, val atMs: Long)
+
+    private val advisoryCache = object : LinkedHashMap<String, CachedAdvisory>(8, 0.75f, true) {
+        override fun removeEldestEntry(
+            eldest: MutableMap.MutableEntry<String, CachedAdvisory>
+        ): Boolean = size > 8
+    }
+
+    /**
+     * Fast advisory formats: the authoritative cache when present,
+     * else the /player metadata list. Never starts an extraction.
+     */
+    suspend fun fetchFormatsFast(url: String): FormatsResult? {
+        cachedFormats(url)?.let { return it }
+        synchronized(advisoryCache) {
+            val hit = advisoryCache[url]
+            if (hit != null &&
+                System.currentTimeMillis() - hit.atMs <= FORMATS_CACHE_TTL_MS
+            ) {
+                return hit.result
+            }
+        }
+        val videoId = YouTubeApiClient.extractVideoId(url) ?: return null
+        val meta = DirectYouTube.playerFormats(videoId) ?: return null
+        if (meta.video.isEmpty()) return null
+        synchronized(advisoryCache) {
+            advisoryCache[url] = CachedAdvisory(meta, System.currentTimeMillis())
+        }
+        logNote(
+            "fetchFormatsFast",
+            "player-meta list url=$url tiers=${meta.video.size} max=${meta.maxHeight}"
+        )
+        return meta
+    }
+
     /** Fire-and-forget: fetch formats into the cache in the background. */
     fun prewarmFormats(url: String) {
         if (url.isEmpty() || cachedFormats(url) != null) return
@@ -112,6 +152,14 @@ object YtDlpManager {
         if (!started) return
         managerScope.launch {
             try {
+                // Advisory list first (one cheap call) so a dialog
+                // opened seconds later paints instantly; the full
+                // extraction follows in the same flight.
+                try {
+                    fetchFormatsFast(url)
+                } catch (e: Exception) {
+                    // Advisory only — the extraction below is authoritative.
+                }
                 fetchFormats(url)
             } finally {
                 synchronized(formatsInFlight) { formatsInFlight.remove(url) }
@@ -276,9 +324,25 @@ object YtDlpManager {
         val request = YoutubeDLRequest(url)
         request.addOption("--socket-timeout", "30")
         request.addOption("--extractor-retries", "3")
+        // A watch URL copied from a Mix page can carry &list= — the app
+        // always means the single video (Claude review point, 2026-10-22).
+        request.addOption("--no-playlist")
         appContext?.let { ctx ->
             CookieHelper.getCookieFilePath(ctx)?.let { cookiePath ->
                 request.addOption("--cookies", cookiePath)
+            }
+            // Persistent cache dir: solved signature/nsig results are
+            // disk-cached and reused across runs. NOTE (verified in the
+            // baked yt-dlp source): the player JS itself is only cached
+            // per-process in memory, so this does NOT stop its
+            // re-download — the /player-metadata fast list exists for
+            // that. This is a modest, free saving on repeat extractions.
+            try {
+                request.addOption(
+                    "--cache-dir",
+                    java.io.File(ctx.noBackupFilesDir, "ytdlp-cache").absolutePath
+                )
+            } catch (_: Exception) {
             }
         }
         return request
@@ -358,22 +422,35 @@ object YtDlpManager {
             // wait on a slow network. The baked-in yt-dlp is the latest
             // stable, so proceeding at once never runs an old version.
             managerScope.launch { ensureUpdated() }
-            val clients = listOf<String?>(null, "tv", "web_safari")
+            // Attempt order (fast-first, 2026-10-22): the first attempt
+            // skips the watch-page HTML (~1MB), client configs and the
+            // DASH/HLS manifests — the bytes dominate on a slow link.
+            // It is only accepted with a plausible coverage (maxHeight
+            // >= 720); anything less falls through to the proven chain
+            // (default, then tv / web_safari on failure).
+            val attempts = listOf(null to true, null to false, "tv" to false, "web_safari" to false)
             var lastError: Exception? = null
-            for (client in clients) {
+            for ((client, fast) in attempts) {
                 try {
-                    val attempt = fetchFormatsOnce(url, client)
-                    if (attempt.video.isNotEmpty() || attempt.music.isNotEmpty()) {
+                    val attempt = fetchFormatsOnce(url, client, fast)
+                    val usable = attempt.video.isNotEmpty() || attempt.music.isNotEmpty()
+                    val coverageOk = !fast || attempt.maxHeight >= 720
+                    if (usable && coverageOk) {
                         synchronized(formatsCache) {
                             formatsCache[url] =
                                 CachedFormats(attempt, System.currentTimeMillis())
                         }
                         return@withContext Result.success(attempt)
                     }
-                    lastError = Exception("client=${client ?: "default"} returned no formats")
+                    lastError = Exception(
+                        "client=${client ?: "default"} fast=$fast returned no formats"
+                    )
                 } catch (e: Exception) {
                     lastError = e
-                    logNote("fetchFormats.attempt", "client=${client ?: "default"} failed: ${e.message}")
+                    logNote(
+                        "fetchFormats.attempt",
+                        "client=${client ?: "default"} fast=$fast failed: ${e.message}"
+                    )
                 }
             }
             Result.failure(lastError ?: Exception("No formats found"))
@@ -383,12 +460,26 @@ object YtDlpManager {
         }
     }
 
-    private suspend fun fetchFormatsOnce(url: String, client: String?): FormatsResult =
+    private suspend fun fetchFormatsOnce(
+        url: String,
+        client: String?,
+        fast: Boolean = false
+    ): FormatsResult =
         withContext(Dispatchers.IO) {
             val request = baseRequest(url)
-            if (client != null) {
-                request.addOption("--extractor-args", "youtube:player_client=$client")
+            val args = StringBuilder("youtube:")
+            var hasArgs = false
+            fun arg(s: String) {
+                if (hasArgs) args.append(';')
+                args.append(s)
+                hasArgs = true
             }
+            if (client != null) arg("player_client=$client")
+            if (fast) {
+                arg("player_skip=webpage,configs,initial_data")
+                arg("skip=hls,dash,translated_subs")
+            }
+            if (hasArgs) request.addOption("--extractor-args", args.toString())
             request.addOption("--dump-json")
             request.addOption("--no-download")
             val response = YoutubeDL.getInstance().execute(request)
