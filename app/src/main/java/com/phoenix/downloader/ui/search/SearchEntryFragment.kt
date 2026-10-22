@@ -146,13 +146,15 @@ class SearchEntryFragment : Fragment() {
             }
         } else {
             SearchHistoryStore.add(requireContext(), text)
-            // A search is YouTube's own search now (browser-base spec
-            // 2026-10-22): the home browser opens YouTube's results
-            // page for the query — YouTube's flow and ranking, with
-            // our download buttons injected — not the native list.
-            val resultsUrl = "https://m.youtube.com/results?search_query=" +
-                android.net.Uri.encode(text)
-            (activity as? MainActivity)?.showHomeWithUrl(resultsUrl)
+            // COVER (user decision 2026-10-22 18:49): YouTube's own
+            // results page freezes in our WebView (Chrome loads the
+            // same URL fine - the fault is on our side, un-isolated
+            // after two builds), so a query goes to OUR native
+            // results screen instead. The data is still YouTube's own
+            // search (DirectYouTube/InnerTube, Worker fallback) -
+            // only the surface is ours: list with per-item download
+            // buttons; a tap opens the video in the browser.
+            (activity as? MainActivity)?.openSearch(text)
         }
     }
 
