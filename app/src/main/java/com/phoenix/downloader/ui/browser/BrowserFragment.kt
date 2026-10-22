@@ -235,7 +235,31 @@ class BrowserFragment : Fragment() {
                 try {
                     var debug = {anchors: 0, matched: 0, added: 0, refreshed: 0, noThumb: 0, inPlayer: 0, noHost: 0, fbAdded: 0, hdr: 0, vis: null, err: null};
                     var stats = window._phxStats || (window._phxStats = {added: 0, refreshed: 0, passes: 0});
-                    var DL_ICON = '<svg viewBox="0 0 24 24" width="27" height="27" fill="none" stroke="#e62117" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.8v10.7"/><path d="M6.6 9.9 12 15.3l5.4-5.4"/><path d="M4 15v3.6A2.4 2.4 0 0 0 6.4 21h11.2A2.4 2.4 0 0 0 20 18.6V15"/></svg>';
+                    // Trusted Types (field log 2026-10-22 15:08): YouTube's
+                    // page policy rejects HTML-string assignment
+                    // ('This document requires TrustedHTML assignment'),
+                    // which killed EVERY button creation. Build the icon
+                    // with DOM APIs instead - no HTML parsing involved.
+                    function dlIconSvg(size) {
+                        var NS = 'http://www.w3.org/2000/svg';
+                        var svg = document.createElementNS(NS, 'svg');
+                        svg.setAttribute('viewBox', '0 0 24 24');
+                        svg.setAttribute('width', size);
+                        svg.setAttribute('height', size);
+                        svg.setAttribute('fill', 'none');
+                        svg.setAttribute('stroke', '#e62117');
+                        svg.setAttribute('stroke-width', '2.1');
+                        svg.setAttribute('stroke-linecap', 'round');
+                        svg.setAttribute('stroke-linejoin', 'round');
+                        var ds = ['M12 3.8v10.7', 'M6.6 9.9 12 15.3l5.4-5.4',
+                            'M4 15v3.6A2.4 2.4 0 0 0 6.4 21h11.2A2.4 2.4 0 0 0 20 18.6V15'];
+                        for (var i = 0; i < ds.length; i++) {
+                            var pth = document.createElementNS(NS, 'path');
+                            pth.setAttribute('d', ds[i]);
+                            svg.appendChild(pth);
+                        }
+                        return svg;
+                    }
                     var reported = false;
                     function probeVis(btn) {
                         try {
@@ -376,7 +400,7 @@ class BrowserFragment : Fragment() {
                                 var btn = document.createElement('div');
                                 btn.setAttribute('data-phoenix-btn', '1');
                                 btn.setAttribute('data-vid', vid);
-                                btn.innerHTML = DL_ICON;
+                                btn.appendChild(dlIconSvg(27));
                                 btn.style.cssText = 'position:absolute;right:30px;bottom:4px;width:44px;height:44px;' +
                                     'display:flex;align-items:center;justify-content:center;' +
                                     'z-index:9999;cursor:pointer;background:transparent;';
@@ -415,7 +439,7 @@ class BrowserFragment : Fragment() {
                                         } catch (e5) {}
                                         var hb = document.createElement('div');
                                         hb.setAttribute('data-phoenix-hdr', '1');
-                                        hb.innerHTML = DL_ICON;
+                                        hb.appendChild(dlIconSvg(27));
                                         hb.style.cssText = 'position:absolute;right:52px;top:50%;transform:translateY(-50%);' +
                                             'width:44px;height:44px;display:flex;align-items:center;justify-content:center;' +
                                             'z-index:9999;cursor:pointer;background:transparent;';
@@ -471,46 +495,83 @@ class BrowserFragment : Fragment() {
     }
 
     /**
-     * Hide YouTube's own header on EVERY page (user spec 2026-10-22:
-     * the logo icon, the "YouTube" wordmark, the Open App button, the
-     * search button and the three dots — shown nowhere). One style
-     * tag, re-applied after SPA navigations. Which candidate actually
-     * matched (or the all-false census) is reported once per page, so
-     * a miss is diagnosable from the log instead of guessed.
+     * Hide YouTube's own chrome on EVERY page (user spec 2026-10-22):
+     * the header (logo icon, "YouTube" wordmark, Open App, search,
+     * three dots) AND the bottom button/pivot bar — shown nowhere.
+     *
+     * Second attempt: build 299's census showed the candidates DO
+     * exist (header element, ytm-mobile-topbar-renderer, ytm-header
+     * depending on the page), yet the bar stayed visible — a style
+     * element alone is not proof of hiding. Now every matched element
+     * ALSO gets display:none via the CSSOM (setProperty with
+     * !important — not subject to style-element CSP), re-applied on
+     * an interval + MutationObserver because YouTube's SPA swaps the
+     * elements. The census (now including the pivot bar) is reported
+     * once per page for the log.
      */
     private fun injectPageStyle(webView: WebView) {
         val js = """
             (function() {
                 try {
-                    var CANDS = ['ytm-header', 'header', '#header', 'ytm-mobile-topbar-renderer', '#mobile-topbar'];
-                    var matched = null;
-                    var census = {};
-                    for (var i = 0; i < CANDS.length; i++) {
-                        census[CANDS[i]] = !!document.querySelector(CANDS[i]);
-                        if (!matched && census[CANDS[i]]) matched = CANDS[i];
+                    var HEAD = ['ytm-header', 'header', '#header', 'ytm-mobile-topbar-renderer', '#mobile-topbar'];
+                    var PIVOT = ['ytm-pivot-bar-renderer', '#pivot-bar', 'ytm-pivot-bar-item-renderer'];
+                    var ALL = HEAD.concat(PIVOT);
+                    function firstMatch(list) {
+                        for (var i = 0; i < list.length; i++) {
+                            if (document.querySelector(list[i])) return list[i];
+                        }
+                        return null;
+                    }
+                    function applyHide() {
+                        var hidden = 0;
+                        for (var i = 0; i < ALL.length; i++) {
+                            var els = document.querySelectorAll(ALL[i]);
+                            for (var j = 0; j < els.length; j++) {
+                                try {
+                                    els[j].style.setProperty('display', 'none', 'important');
+                                    hidden++;
+                                } catch (e) {}
+                            }
+                        }
+                        return hidden;
                     }
                     var st = document.getElementById('phoenix-page-style');
                     if (!st) {
                         st = document.createElement('style');
                         st.id = 'phoenix-page-style';
-                        st.textContent = CANDS.join(',') + ' { display: none !important; }';
+                        st.textContent = ALL.join(',') + ' { display: none !important; }';
                         (document.head || document.documentElement).appendChild(st);
+                    }
+                    var hiddenNow = applyHide();
+                    var tries = 0;
+                    var timer = setInterval(function() {
+                        tries++;
+                        applyHide();
+                        if (tries >= 12) clearInterval(timer);
+                    }, 1000);
+                    if (!window._phoenixChromeObserver && document.body) {
+                        try {
+                            window._phoenixChromeObserver = new MutationObserver(function() { applyHide(); });
+                            window._phoenixChromeObserver.observe(document.body, { childList: true, subtree: true });
+                        } catch (e) {}
                     }
                     if (!window._phoenixChromeSent) window._phoenixChromeSent = {};
                     var key = 'chrome:' + location.href.split('&')[0];
                     if (!window._phoenixChromeSent[key]) {
                         window._phoenixChromeSent[key] = 1;
+                        var census = {};
+                        for (var c = 0; c < ALL.length; c++) census[ALL[c]] = !!document.querySelector(ALL[c]);
                         try {
                             if (window.PhoenixDownloader && PhoenixDownloader.reportDiag) {
                                 PhoenixDownloader.reportDiag(JSON.stringify({
-                                    chrome: {header: matched || 'none'},
+                                    chrome: {header: firstMatch(HEAD) || 'none', pivot: firstMatch(PIVOT) || 'none', hidden: hiddenNow},
                                     census: census,
                                     href: location.href
                                 }));
                             }
                         } catch (e) {}
                     }
-                    return JSON.stringify({header: matched || 'none'});
+                    return JSON.stringify({header: firstMatch(HEAD) || 'none', pivot: firstMatch(PIVOT) || 'none', hidden: hiddenNow});
                 } catch (e) {
                     return JSON.stringify({err: 'outer: ' + (e && e.message || e)});
                 }
@@ -593,7 +654,16 @@ class BrowserFragment : Fragment() {
                             'background:radial-gradient(circle at 35% 30%, #c0272d, #7d0a10);' +
                             'display:flex;align-items:center;justify-content:center;' +
                             'box-shadow:inset 0 2px 4px rgba(0,0,0,.45);';
-                        circ.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16"><path fill="#ffffff" d="M12 3.5v10.1l3.4-3.4 1.9 1.9L12 17.4l-5.3-5.3 1.9-1.9 3.4 3.4V3.5zM5 19.2h14V21H5z"/></svg>';
+                        var svgNS = 'http://www.w3.org/2000/svg';
+                        var svgEl = document.createElementNS(svgNS, 'svg');
+                        svgEl.setAttribute('viewBox', '0 0 24 24');
+                        svgEl.setAttribute('width', '16');
+                        svgEl.setAttribute('height', '16');
+                        var pathEl = document.createElementNS(svgNS, 'path');
+                        pathEl.setAttribute('fill', '#ffffff');
+                        pathEl.setAttribute('d', 'M12 3.5v10.1l3.4-3.4 1.9 1.9L12 17.4l-5.3-5.3 1.9-1.9 3.4 3.4V3.5zM5 19.2h14V21H5z');
+                        svgEl.appendChild(pathEl);
+                        circ.appendChild(svgEl);
                         var txt = document.createElement('span');
                         txt.textContent = 'DOWNLOAD';
                         txt.style.cssText = 'color:#ffffff;font-weight:800;font-size:14px;letter-spacing:.6px;';
