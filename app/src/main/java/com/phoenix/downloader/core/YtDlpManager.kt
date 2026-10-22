@@ -1,6 +1,10 @@
 package com.phoenix.downloader.core
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.content.Context
+import android.os.Build
+import androidx.core.app.NotificationCompat
 import com.phoenix.downloader.model.FormatOption
 import com.phoenix.downloader.model.VideoInfo
 import com.yausername.youtubedl_android.YoutubeDL
@@ -37,7 +41,7 @@ object YtDlpManager {
      * directly with the latest — no old version, ever. The runtime self-update
      * (AUTO_UPDATE) can still advance beyond this floor afterwards.
      */
-    private const val BUNDLED_YTDLP_VERSION = "2026.08.19"
+    private const val BUNDLED_YTDLP_VERSION = "2026.10.21"
 
     /** Set when init() throws; the real reason fetches fail. */
     private var initError: Throwable? = null
@@ -59,6 +63,37 @@ object YtDlpManager {
     private val formatsInFlight = HashSet<String>()
     private val managerScope =
         CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.IO)
+
+    // ---- Raw extraction JSON cache (playback reuse) ----
+    // Every full --dump-json extraction (fetchVideoInfo, fetchFormatsOnce)
+    // already contains direct stream URLs for every format. Stash the raw
+    // JSON so resolveStreamUrls can pick a playable pair from it instead of
+    // paying for a second extraction — on the detail page the pre-warm and
+    // the player used to run two extractions side by side.
+    private data class CachedJson(val json: org.json.JSONObject, val atMs: Long)
+
+    private val streamJsonCache = object : LinkedHashMap<String, CachedJson>(8, 0.75f, true) {
+        override fun removeEldestEntry(
+            eldest: MutableMap.MutableEntry<String, CachedJson>
+        ): Boolean = size > 8
+    }
+
+    private fun stashStreamJson(url: String, json: org.json.JSONObject) {
+        synchronized(streamJsonCache) {
+            streamJsonCache[url] = CachedJson(json, System.currentTimeMillis())
+        }
+    }
+
+    private fun cachedStreamJson(url: String): org.json.JSONObject? =
+        synchronized(streamJsonCache) {
+            val hit = streamJsonCache[url] ?: return null
+            if (System.currentTimeMillis() - hit.atMs > FORMATS_CACHE_TTL_MS) {
+                streamJsonCache.remove(url)
+                null
+            } else {
+                hit.json
+            }
+        }
 
     private fun cachedFormats(url: String): FormatsResult? = synchronized(formatsCache) {
         val hit = formatsCache[url] ?: return null
@@ -92,7 +127,7 @@ object YtDlpManager {
             // from older APKs already extracted the OLD yt-dlp into
             // noBackupFilesDir, and the library only extracts res/raw/ytdlp
             // when the binary is missing. Delete the extracted dir so the
-            // baked-in 2026.08.19 is extracted on this init. Runs BEFORE
+            // baked-in 2026.10.21 is extracted on this init. Runs BEFORE
             // YoutubeDL.init; the marker makes later launches (and any newer
             // self-updated version) untouched.
             try {
@@ -258,6 +293,7 @@ object YtDlpManager {
             request.addOption("--no-download")
             val response = YoutubeDL.getInstance().execute(request)
             val json = org.json.JSONObject(response.out)
+            stashStreamJson(url, json)
 
             // Speed (2026-10-21): this dump already carries the full
             // formats array — seed the formats cache so the download
@@ -300,7 +336,7 @@ object YtDlpManager {
      * Step 2: list downloadable formats, split into music and video.
      *
      * Speed: ONE extraction with the default client normally suffices
-     * (yt-dlp 2026.08.19's solver is current). The tv / web_safari clients
+     * (yt-dlp 2026.10.21's solver is current). The tv / web_safari clients
      * are only tried if the default attempt throws or returns nothing —
      * the old always-try-everyone chain cost up to 3x the wait.
      *
@@ -357,6 +393,7 @@ object YtDlpManager {
             request.addOption("--no-download")
             val response = YoutubeDL.getInstance().execute(request)
             val json = org.json.JSONObject(response.out)
+            stashStreamJson(url, json)
             parseFormatsJson(json, client, response.err ?: "", url)
         }
 
@@ -458,6 +495,61 @@ object YtDlpManager {
     /** Direct playable stream URLs for the preview player. */
     data class StreamUrls(val videoUrl: String, val audioUrl: String?)
 
+    private fun videoScore(f: org.json.JSONObject): Long =
+        f.optInt("height", 0).toLong() * 1_000_000L +
+            f.optDouble("tbr", 0.0).toLong()
+
+    private fun audioScore(f: org.json.JSONObject): Long {
+        val abr = f.optDouble("abr", 0.0)
+        val rate = if (abr > 0) abr else f.optDouble("tbr", 0.0)
+        return rate.toLong() * 1_000L + f.optLong("filesize", 0) / 1024
+    }
+
+    /**
+     * Pick a playable (video, audio) pair out of a full extraction's
+     * formats array — the same selection the live path's -f selector
+     * makes (best video <=720p + best audio), without a new extraction.
+     * Returns null when the array carries no directly usable URLs.
+     */
+    private fun streamUrlsFromJson(json: org.json.JSONObject): StreamUrls? {
+        val arr = json.optJSONArray("formats") ?: return null
+        var bestVideoLe720: org.json.JSONObject? = null
+        var bestVideoAny: org.json.JSONObject? = null
+        var bestAudio: org.json.JSONObject? = null
+        for (i in 0 until arr.length()) {
+            val f = arr.getJSONObject(i)
+            if (f.optString("url", "").isEmpty()) continue
+            val vc = f.optString("vcodec", "none")
+            val ac = f.optString("acodec", "none")
+            if (vc == "none" && ac == "none") continue
+            if (vc != "none") {
+                val h = f.optInt("height", 0)
+                if (h in 1..720 &&
+                    (bestVideoLe720 == null || videoScore(f) > videoScore(bestVideoLe720!!))
+                ) {
+                    bestVideoLe720 = f
+                }
+                if (bestVideoAny == null || videoScore(f) > videoScore(bestVideoAny!!)) {
+                    bestVideoAny = f
+                }
+            } else if (ac != "none") {
+                if (bestAudio == null || audioScore(f) > audioScore(bestAudio!!)) {
+                    bestAudio = f
+                }
+            }
+        }
+        val video = bestVideoLe720 ?: bestVideoAny ?: return null
+        val videoUrl = video.optString("url", "")
+        if (videoUrl.isEmpty()) return null
+        val muxed = video.optString("acodec", "none") != "none"
+        val audioUrl = if (muxed) {
+            null
+        } else {
+            bestAudio?.optString("url", "")?.ifEmpty { null }
+        }
+        return StreamUrls(videoUrl, audioUrl)
+    }
+
     /**
      * Resolve playable stream URLs (<=720p for a fast preview start).
      *
@@ -470,7 +562,39 @@ object YtDlpManager {
     suspend fun resolveStreamUrls(url: String): Result<StreamUrls> = withContext(Dispatchers.IO) {
         try {
             if (!isReady()) return@withContext Result.failure(Exception(notReadyReason()))
-            ensureUpdated()
+            // Speed (2026-10-21): never make playback wait on the yt-dlp
+            // self-update — fire it in the background exactly like
+            // fetchFormats does. The baked-in yt-dlp is the latest stable,
+            // so playing at once never runs an old version.
+            managerScope.launch { ensureUpdated() }
+            // Speed (2026-10-21): reuse a full extraction's JSON when one
+            // is already cached for this URL (detail-page pre-warm,
+            // browser info fetch, dialog fetch) instead of paying for a
+            // second extraction. If that fetch is still in flight, give
+            // it a short window to land — one shared extraction beats
+            // two Python processes racing on the phone.
+            var waitedMs = 0L
+            while (true) {
+                val cached = cachedStreamJson(url)
+                if (cached != null) {
+                    val fromCache = try {
+                        streamUrlsFromJson(cached)
+                    } catch (e: Exception) {
+                        null
+                    }
+                    if (fromCache != null) {
+                        logNote(
+                            "resolveStreamUrls.cache",
+                            "hit url=$url waitedMs=$waitedMs audio=${if (fromCache.audioUrl != null) "yes" else "no"}"
+                        )
+                        return@withContext Result.success(fromCache)
+                    }
+                }
+                val inFlight = synchronized(formatsInFlight) { url in formatsInFlight }
+                if (!inFlight || waitedMs >= 12_000L) break
+                delay(500)
+                waitedMs += 500
+            }
             var lastError: Exception? = null
             for (client in listOf<String?>(null, "tv")) {
                 try {
@@ -483,6 +607,7 @@ object YtDlpManager {
                     request.addOption("--no-download")
                     val response = YoutubeDL.getInstance().execute(request)
                     val json = org.json.JSONObject(response.out)
+                    stashStreamJson(url, json)
                     val requested = json.optJSONArray("requested_formats")
                     var video: String? = null
                     var audio: String? = null
@@ -527,10 +652,64 @@ object YtDlpManager {
     @Volatile
     private var updateDone = false
 
+    private const val UPDATE_CHANNEL_ID = "phoenix_update"
+    private const val UPDATE_NOTIF_ID = 4401
+
+    @Volatile
+    private var updateRunning = false
+
+    /**
+     * Tell the user a yt-dlp update is in progress (user request
+     * 2026-10-22). The update otherwise downloads invisibly in the
+     * background, and a first play/download that waits on it looks
+     * like an error. Shown only when the update runs longer than a
+     * couple of seconds; removed as soon as it finishes, whatever
+     * the outcome.
+     */
+    private fun showUpdateNotification() {
+        val ctx = appContext ?: return
+        try {
+            val nm =
+                ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                nm.createNotificationChannel(
+                    NotificationChannel(
+                        UPDATE_CHANNEL_ID,
+                        "App updates",
+                        NotificationManager.IMPORTANCE_LOW
+                    )
+                )
+            }
+            val notif = NotificationCompat.Builder(ctx, UPDATE_CHANNEL_ID)
+                .setSmallIcon(android.R.drawable.stat_notify_sync)
+                .setContentTitle("Updating yt-dlp…")
+                .setContentText("One moment — playback and downloads continue when it's done.")
+                .setOngoing(true)
+                .setOnlyAlertOnce(true)
+                .setShowWhen(false)
+                .setPriority(NotificationCompat.PRIORITY_LOW)
+                .build()
+            nm.notify(UPDATE_NOTIF_ID, notif)
+        } catch (e: Exception) {
+            android.util.Log.w("YtDlpManager", "update notification failed", e)
+        }
+    }
+
+    private fun hideUpdateNotification() {
+        val ctx = appContext ?: return
+        try {
+            val nm =
+                ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            nm.cancel(UPDATE_NOTIF_ID)
+        } catch (_: Exception) {
+        }
+    }
+
     /**
      * Runs the yt-dlp self-update at most once per process, serialized.
-     * Called from init (background) and awaited at the top of fetch/resolve
-     * so the first extraction of a session already uses the latest yt-dlp.
+     * Called from init (background) and fired (not awaited) at the top of
+     * fetch/resolve so the latest yt-dlp is in place early without making
+     * the first fetch or playback wait on it.
      * A slow network never wedges a fetch: after 120s it proceeds with the
      * currently installed version and retries on the next call.
      */
@@ -538,16 +717,27 @@ object YtDlpManager {
         if (updateDone) return
         updateMutex.withLock {
             if (updateDone) return
-            val r = kotlinx.coroutines.withTimeoutOrNull(120_000) { checkForUpdates() }
-            if (r != null) {
-                logNote(
-                    "YtDlpManager.update",
-                    "installed=${r.getOrNull()} error=${r.exceptionOrNull()?.message} " +
-                        "version now: ${getYtDlpVersion()}"
-                )
-                updateDone = true
-            } else {
-                logNote("YtDlpManager.update", "update timed out (120s) — proceeding with installed version")
+            updateRunning = true
+            val notifJob = managerScope.launch {
+                delay(2000)
+                if (updateRunning) showUpdateNotification()
+            }
+            try {
+                val r = kotlinx.coroutines.withTimeoutOrNull(120_000) { checkForUpdates() }
+                if (r != null) {
+                    logNote(
+                        "YtDlpManager.update",
+                        "installed=${r.getOrNull()} error=${r.exceptionOrNull()?.message} " +
+                            "version now: ${getYtDlpVersion()}"
+                    )
+                    updateDone = true
+                } else {
+                    logNote("YtDlpManager.update", "update timed out (120s) — proceeding with installed version")
+                }
+            } finally {
+                updateRunning = false
+                notifJob.cancel()
+                hideUpdateNotification()
             }
         }
     }

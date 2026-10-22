@@ -41,6 +41,21 @@ object YouTubeApiClient {
     /** Last Worker host that answered; tried first on the next call. */
     @Volatile
     private var lastGoodHost: String = WORKER_HOSTS[0]
+
+    /**
+     * Apps Script relay deployments (2026-10-21). On networks where
+     * connections to the Cloudflare Worker hosts are killed outright
+     * (the user's MPT home WiFi resets them — in Chrome too, so no
+     * direct host survives there), the app asks script.google.com to
+     * fetch the Worker server-side instead: the client leg rides
+     * Google IPs, which those networks do not block. The script
+     * (scripts/apps_script_relay.gs) answers {"s": status, "b": body}
+     * because Apps Script web apps always return HTTP 200 themselves.
+     * Tried only after every direct host failed on a TRANSPORT error.
+     */
+    private val RELAY_URLS = listOf(
+        "https://script.google.com/macros/s/AKfycbw6REMeVfXlP72GytuRTA_B08isVqB79y5qwz1fZt8fNzGHRLWnaABr1F4HM18G3itcew/exec"
+    )
     // Legacy direct API (kept for reference; not used)
     private const val API_KEY = "AIzaSyDVpveH9BzSa7QZh7QT7Uh2zMasfEWR8Pw"
     private const val BASE_URL = "https://www.googleapis.com/youtube/v3/videos"
@@ -119,15 +134,37 @@ object YouTubeApiClient {
     }
 
     /**
+     * One relay attempt for a Worker path: the Apps Script deployment
+     * fetches the Worker server-side and wraps the answer as
+     * {"s": <real status>, "b": <body>}; unwrap it here so callers see
+     * exactly what a direct Worker call would have returned. Throws on
+     * transport failure or an unreadable wrap.
+     */
+    private fun relayGetOnce(relayBase: String, path: String, timeoutMs: Long): Pair<Int, String> {
+        val relayUrl = relayBase + "?u=" + URLEncoder.encode(path, "UTF-8")
+        val (_, wrapBody) = workerGetOnce(relayUrl, timeoutMs)
+        val wrap = try {
+            JSONObject(wrapBody)
+        } catch (e: Exception) {
+            throw java.io.IOException("relay returned an unreadable response", e)
+        }
+        if (!wrap.has("s") || !wrap.has("b")) {
+            throw java.io.IOException("relay response is missing s/b fields")
+        }
+        return wrap.getInt("s") to wrap.getString("b")
+    }
+
+    /**
      * GET a Worker URL through the DoH-backed client, trying the known
      * Worker hosts in order (last host that answered first). A host
      * counts as failed only on a TRANSPORT error (reset, timeout, DNS);
      * any HTTP response — even an error status — is returned as-is,
      * matching what callers used to read from HttpURLConnection.
-     * When every host fails, the failure is written to the in-app crash
-     * log (field diagnosis must not depend on logcat) and the last
-     * transport exception is thrown, preserving callers' IOException
-     * retry semantics.
+     * When every direct host fails on transport, the Apps Script relay
+     * gets a turn (see RELAY_URLS). When everything fails, the failure
+     * is written to the in-app crash log (field diagnosis must not
+     * depend on logcat) and the last transport exception is thrown,
+     * preserving callers' IOException retry semantics.
      */
     private fun workerGet(urlStr: String, timeoutMs: Long = 15000L): Pair<Int, String> {
         val path = urlStr.removePrefix(WORKER_BASE)
@@ -144,8 +181,22 @@ object YouTubeApiClient {
                 lastError = e
             }
         }
-        val failure = lastError ?: java.io.IOException("all Worker hosts failed: $path")
-        CrashLogger.logNonFatal(TAG, Exception("all Worker hosts failed for $path", failure))
+        val directFailure = lastError ?: java.io.IOException("all Worker hosts failed: $path")
+        for (relay in RELAY_URLS) {
+            try {
+                val result = relayGetOnce(relay, path, timeoutMs)
+                CrashLogger.logNonFatal(
+                    TAG,
+                    Exception("direct hosts failed; served via relay for $path", directFailure)
+                )
+                return result
+            } catch (e: Exception) {
+                Log.w(TAG, "Relay failed: $path", e)
+                lastError = e
+            }
+        }
+        val failure = lastError ?: directFailure
+        CrashLogger.logNonFatal(TAG, Exception("all Worker hosts + relay failed for $path", failure))
         throw failure
     }
 
