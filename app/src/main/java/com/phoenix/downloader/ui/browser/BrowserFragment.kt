@@ -731,6 +731,13 @@ class BrowserFragment : Fragment() {
                     }
                     function applyHide() {
                         var hidden = 0;
+                        try {
+                            var pb = document.querySelectorAll('#player-container-id button, .html5-video-player button, ytm-player button');
+                            for (var u = 0; u < pb.length; u++) {
+                                var lbl = (pb[u].getAttribute('aria-label') || '');
+                                if (/unmute/i.test(lbl)) hideEl(pb[u]);
+                            }
+                        } catch (e) {}
                         for (var i = 0; i < ALL.length; i++) {
                             var els = document.querySelectorAll(ALL[i]);
                             for (var j = 0; j < els.length; j++) { hideEl(els[j]); hidden++; }
@@ -756,6 +763,7 @@ class BrowserFragment : Fragment() {
                         st = document.createElement('style');
                         st.id = 'phoenix-page-style';
                         st.textContent = ALL.join(',') + ' { display: none !important; }' +
+                            '.ytp-unmute-button { display: none !important; }' +
                             THUMB_SELS.join(',') + ' { border-radius: 14px !important; overflow: hidden !important; }' +
                             '.phx-tb { border-radius: 18px !important; overflow: hidden !important; }' +
                             '.phx-tb-sm { border-radius: 10px !important; overflow: hidden !important; }';
