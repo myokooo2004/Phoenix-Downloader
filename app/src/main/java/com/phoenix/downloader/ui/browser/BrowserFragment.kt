@@ -47,6 +47,23 @@ class BrowserFragment : Fragment() {
 
     /** The WebView's current URL, if the view exists. */
     fun currentUrl(): String? = if (_binding != null) binding.webview.url else null
+
+    /**
+     * Standalone (pushed) browser only: on a YouTube watch page the
+     * toolbar and bottom bar hide too, so the video is full at the
+     * top (user spec 2026-10-22 — the same rule the home browser
+     * follows; in home mode both bars are always hidden already).
+     * The phone back key still leaves the page.
+     */
+    private fun updateStandaloneChrome(url: String) {
+        if (arguments?.getBoolean(ARG_HOME) == true) return
+        if (_binding == null) return
+        val watch = url.contains("youtube.com/watch") || url.contains("youtu.be/") ||
+            url.contains("youtube.com/shorts")
+        val vis = if (watch) View.GONE else View.VISIBLE
+        binding.toolbarBrowser.visibility = vis
+        binding.bottomBar.visibility = vis
+    }
     private var pendingVideoUrl: String? = null
 
     override fun onCreateView(
@@ -122,6 +139,7 @@ class BrowserFragment : Fragment() {
                 binding.tvUrl.text = url
                 checkForVideo(url)
                 onHostUrlChanged?.invoke(url)
+                updateStandaloneChrome(url)
             }
 
             override fun onPageFinished(view: WebView, url: String) {
@@ -129,6 +147,7 @@ class BrowserFragment : Fragment() {
                 val currentUrl = view.url ?: url
                 binding.tvUrl.text = currentUrl
                 checkForVideo(currentUrl)
+                updateStandaloneChrome(currentUrl)
                 // Save cookies for yt-dlp bot bypass (from Python file insight)
                 try {
                     com.phoenix.downloader.core.CookieHelper.saveCookiesForUrl(
@@ -148,6 +167,7 @@ class BrowserFragment : Fragment() {
                 binding.tvUrl.text = url
                 checkForVideo(url)
                 onHostUrlChanged?.invoke(url)
+                updateStandaloneChrome(url)
                 // Re-inject per-video download buttons after SPA navigation
                 injectDownloadButtons(view)
                 injectWatchActions(view)
@@ -882,6 +902,33 @@ class BrowserFragment : Fragment() {
                             var vid = currentVid();
                             if (!vid) return 'no-vid';
                             if (location.href.indexOf('/watch') < 0) return 'not-watch';
+                            // Unmute (user 2026-10-22): a watch page
+                            // opened from our native results loads
+                            // with no in-page tap first, so YouTube
+                            // starts the video muted (the white
+                            // speaker-x chip). Undo that during the
+                            // first seconds only, and stop as soon as
+                            // the video is seen playing with sound -
+                            // a mute the user sets later is respected.
+                            try {
+                                if (!window._phxUnmute) window._phxUnmute = {};
+                                var uu = window._phxUnmute[vid];
+                                var nowU = Date.now();
+                                if (!uu) { uu = window._phxUnmute[vid] = {t: nowU, done: false}; }
+                                if (!uu.done && nowU - uu.t < 15000) {
+                                    var vel = document.querySelector('video');
+                                    if (vel) {
+                                        if (vel.muted) {
+                                            vel.muted = false;
+                                            try { vel.volume = 1; } catch (e) {}
+                                            stats.unmuteTries = (stats.unmuteTries || 0) + 1;
+                                        } else if (!vel.paused && vel.readyState > 0) {
+                                            uu.done = true;
+                                            stats.unmuted = (stats.unmuted || 0) + 1;
+                                        }
+                                    }
+                                }
+                            } catch (e) {}
                             var row = document.getElementById('phoenix-dl-row');
                             if (row && row.getAttribute('data-vid') === vid) {
                                 // Fit guard: the pill belongs UNDER the

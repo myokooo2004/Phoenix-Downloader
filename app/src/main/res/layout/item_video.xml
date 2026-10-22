@@ -8,7 +8,10 @@
     <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="190dp"
-        android:background="@color/card">
+        android:layout_marginStart="12dp"
+        android:layout_marginEnd="12dp"
+        android:background="@drawable/bg_thumb"
+        android:clipToOutline="true">
 
         <ImageView
             android:id="@+id/iv_thumb"
@@ -46,16 +49,15 @@
             android:textColor="@color/text_primary"
             android:textStyle="bold" />
 
-        <TextView
+        <ImageView
             android:id="@+id/btn_item_download"
             android:layout_width="36dp"
             android:layout_height="36dp"
             android:layout_marginStart="12dp"
             android:layout_gravity="bottom"
-            android:gravity="center"
-            android:text="⬇"
-            android:textSize="21sp"
-            android:textColor="#616161"
+            android:padding="7dp"
+            android:src="@drawable/ic_download_red"
+            android:contentDescription="Download"
             android:background="?attr/selectableItemBackgroundBorderless"
             android:clickable="true"
             android:focusable="true" />

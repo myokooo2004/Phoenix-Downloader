@@ -82,12 +82,11 @@
         android:layout_marginTop="4dp"
         android:padding="8dp">
 
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="⬇"
-            android:textSize="16sp"
-            android:textColor="@color/text_primary" />
+        <ImageView
+            android:layout_width="18dp"
+            android:layout_height="18dp"
+            android:src="@drawable/ic_download_red"
+            android:contentDescription="Download" />
 
         <LinearLayout
             android:layout_width="0dp"

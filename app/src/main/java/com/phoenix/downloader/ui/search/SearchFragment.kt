@@ -26,6 +26,15 @@ class SearchFragment : Fragment() {
     private var _binding: FragmentSearchBinding? = null
     private val binding get() = _binding!!
 
+    // Header auto-hide (user spec, same rule as the home browser bar):
+    // scrolling up through results hides the query/downloads header,
+    // scrolling back down toward the top brings it back.
+    private var headerAnimator: android.animation.ValueAnimator? = null
+    private var headerFullHeight = -1
+    private var headerHidden = false
+    private var headerDownAcc = 0
+    private var headerUpAcc = 0
+
     private var query = ""
     private val items = mutableListOf<VideoItem>()
     private lateinit var adapter: VideoAdapter
@@ -69,7 +78,79 @@ class SearchFragment : Fragment() {
             }
         })
 
+        // Header auto-hide on scroll (separate listener; the paging
+        // listener above is untouched).
+        binding.rvSearchResults.addOnScrollListener(object : RecyclerView.OnScrollListener() {
+            override fun onScrolled(rv: RecyclerView, dx: Int, dy: Int) {
+                when {
+                    !rv.canScrollVertically(-1) -> {
+                        headerDownAcc = 0
+                        headerUpAcc = 0
+                        showSearchHeader()
+                    }
+                    dy > 0 -> {
+                        headerDownAcc += dy
+                        headerUpAcc = 0
+                        if (headerDownAcc > 90) hideSearchHeader()
+                    }
+                    dy < 0 -> {
+                        headerUpAcc += -dy
+                        headerDownAcc = 0
+                        if (headerUpAcc > 45) showSearchHeader()
+                    }
+                }
+            }
+        })
+
         loadMore()
+    }
+
+    private fun hideSearchHeader() {
+        if (_binding == null || headerHidden) return
+        headerHidden = true
+        val wrap = binding.searchHeaderWrap
+        if (wrap.height > 0) headerFullHeight = wrap.height
+        animateHeaderHeight(wrap.height, 0) { wrap.visibility = View.GONE }
+    }
+
+    private fun showSearchHeader() {
+        if (_binding == null || !headerHidden) return
+        headerHidden = false
+        val wrap = binding.searchHeaderWrap
+        wrap.visibility = View.VISIBLE
+        val target = if (headerFullHeight > 0) headerFullHeight else {
+            wrap.layoutParams.height = ViewGroup.LayoutParams.WRAP_CONTENT
+            return
+        }
+        animateHeaderHeight(0, target) {
+            wrap.layoutParams.height = ViewGroup.LayoutParams.WRAP_CONTENT
+            wrap.requestLayout()
+        }
+    }
+
+    private fun animateHeaderHeight(from: Int, to: Int, onEnd: () -> Unit) {
+        if (_binding == null) return
+        val wrap = binding.searchHeaderWrap
+        headerAnimator?.cancel()
+        if (from == to) {
+            onEnd()
+            return
+        }
+        headerAnimator = android.animation.ValueAnimator.ofInt(from, to).apply {
+            duration = 160
+            addUpdateListener { anim ->
+                if (_binding == null) return@addUpdateListener
+                val lp = wrap.layoutParams
+                lp.height = anim.animatedValue as Int
+                wrap.layoutParams = lp
+            }
+            addListener(object : android.animation.AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: android.animation.Animator) {
+                    onEnd()
+                }
+            })
+            start()
+        }
     }
 
     private fun loadMore() {
