@@ -625,14 +625,32 @@ class BrowserFragment : Fragment() {
                     function hideEl(el) {
                         try { el.style.setProperty('display', 'none', 'important'); } catch (e) {}
                     }
+                    function isShortsOnly(el) {
+                        // A container may be hidden for Shorts ONLY if
+                        // it holds Shorts links and no normal videos.
+                        // The first version hid any item-section a
+                        // Shorts link appeared in - on the results
+                        // page that section is the WHOLE results
+                        // list, so one Shorts result blanked the page
+                        // (field report 2026-10-22 18:17).
+                        try {
+                            return !!el.querySelector('a[href*="/shorts/"]') &&
+                                !el.querySelector('a[href*="/watch"]');
+                        } catch (e) { return false; }
+                    }
                     function hideShorts() {
                         var n = 0;
                         try {
                             var links = document.querySelectorAll('a[href*="/shorts/"]');
                             for (var i = 0; i < links.length; i++) {
-                                var shelf = links[i].closest('ytm-rich-shelf-renderer, ytm-item-section-renderer, ytm-shelf-renderer, ytm-reel-shelf-renderer');
-                                var target = shelf || links[i].closest('ytm-media-item, ytm-video-with-context-renderer, ytm-compact-video-renderer, ytm-rich-item-renderer');
-                                if (target && target.style.display !== 'none') { hideEl(target); n++; }
+                                var a = links[i];
+                                var target = a.closest('ytm-reel-shelf-renderer') ||
+                                    a.closest('ytm-media-item, ytm-video-with-context-renderer, ytm-compact-video-renderer, ytm-rich-item-renderer, ytm-shorts-lockup-view-model');
+                                if (!target) {
+                                    var sec = a.closest('ytm-rich-shelf-renderer, ytm-item-section-renderer, ytm-shelf-renderer');
+                                    if (sec && isShortsOnly(sec)) target = sec;
+                                }
+                                if (target && target.style.display !== 'none' && isShortsOnly(target)) { hideEl(target); n++; }
                             }
                         } catch (e) {}
                         return n;
