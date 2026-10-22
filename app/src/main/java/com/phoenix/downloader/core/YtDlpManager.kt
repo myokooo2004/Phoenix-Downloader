@@ -570,9 +570,11 @@ object YtDlpManager {
             // Speed (2026-10-21): reuse a full extraction's JSON when one
             // is already cached for this URL (detail-page pre-warm,
             // browser info fetch, dialog fetch) instead of paying for a
-            // second extraction. If that fetch is still in flight, give
-            // it a short window to land — one shared extraction beats
-            // two Python processes racing on the phone.
+            // second extraction. If that fetch is still in flight, JOIN
+            // it — wait while it runs (up to 30s) instead of starting a
+            // duplicate. Field log 2026-10-22: the old 12s cap expired
+            // before a 17s extraction landed, so resolve ran a second
+            // full extraction and playback paid for both.
             var waitedMs = 0L
             while (true) {
                 val cached = cachedStreamJson(url)
@@ -591,7 +593,7 @@ object YtDlpManager {
                     }
                 }
                 val inFlight = synchronized(formatsInFlight) { url in formatsInFlight }
-                if (!inFlight || waitedMs >= 12_000L) break
+                if (!inFlight || waitedMs >= 30_000L) break
                 delay(500)
                 waitedMs += 500
             }
@@ -654,19 +656,16 @@ object YtDlpManager {
 
     private const val UPDATE_CHANNEL_ID = "phoenix_update"
     private const val UPDATE_NOTIF_ID = 4401
-
-    @Volatile
-    private var updateRunning = false
+    private const val PREF_LAST_UPDATE_CHECK_MS = "last_update_check_ms"
+    private const val UPDATE_CHECK_INTERVAL_MS = 24L * 60 * 60 * 1000
 
     /**
-     * Tell the user a yt-dlp update is in progress (user request
-     * 2026-10-22). The update otherwise downloads invisibly in the
-     * background, and a first play/download that waits on it looks
-     * like an error. Shown only when the update runs longer than a
-     * couple of seconds; removed as soon as it finishes, whatever
-     * the outcome.
+     * Tell the user a yt-dlp update download is really in progress
+     * (user request 2026-10-22). Shown ONLY when a newer version is
+     * actually being downloaded — never for the background check —
+     * and removed as soon as the download finishes.
      */
-    private fun showUpdateNotification() {
+    private fun showUpdateNotification(version: String) {
         val ctx = appContext ?: return
         try {
             val nm =
@@ -683,7 +682,7 @@ object YtDlpManager {
             val notif = NotificationCompat.Builder(ctx, UPDATE_CHANNEL_ID)
                 .setSmallIcon(android.R.drawable.stat_notify_sync)
                 .setContentTitle("Updating yt-dlp…")
-                .setContentText("One moment — playback and downloads continue when it's done.")
+                .setContentText("Downloading version $version — one moment.")
                 .setOngoing(true)
                 .setOnlyAlertOnce(true)
                 .setShowWhen(false)
@@ -706,22 +705,67 @@ object YtDlpManager {
     }
 
     /**
-     * Runs the yt-dlp self-update at most once per process, serialized.
-     * Called from init (background) and fired (not awaited) at the top of
-     * fetch/resolve so the latest yt-dlp is in place early without making
-     * the first fetch or playback wait on it.
-     * A slow network never wedges a fetch: after 120s it proceeds with the
-     * currently installed version and retries on the next call.
+     * Honest yt-dlp update flow (user verdict 2026-10-22: the old flow
+     * showed "Updating yt-dlp…" on nearly every launch while merely
+     * CHECKING, and never persisted that it had checked — it looked
+     * like it never really updated). Now: at most one check per 24h,
+     * persisted across restarts. The check is a tiny GitHub release
+     * lookup compared against the installed version; when they match,
+     * nothing else happens and NO notification is shown. The
+     * notification appears only when a newer version really is about
+     * to download, and it names that version. Serialized; called from
+     * init (background), fired (not awaited) at the top of fetch /
+     * resolve, and awaited by downloads — with the 24h gate that wait
+     * is normally instant.
      */
     suspend fun ensureUpdated() {
         if (updateDone) return
         updateMutex.withLock {
             if (updateDone) return
-            updateRunning = true
-            val notifJob = managerScope.launch {
-                delay(2000)
-                if (updateRunning) showUpdateNotification()
+            val prefs = try {
+                appContext?.getSharedPreferences("phoenix_ytdlp", Context.MODE_PRIVATE)
+            } catch (e: Exception) {
+                null
             }
+            val lastCheck = prefs?.getLong(PREF_LAST_UPDATE_CHECK_MS, 0L) ?: 0L
+            if (System.currentTimeMillis() - lastCheck < UPDATE_CHECK_INTERVAL_MS) {
+                logNote(
+                    "YtDlpManager.update",
+                    "skipped — checked <24h ago; version: ${getYtDlpVersion()}"
+                )
+                updateDone = true
+                return
+            }
+            val latest = fetchLatestYtDlpTag()
+            if (latest == null) {
+                // GitHub unreachable: stay silent, do not stamp the
+                // gate — the next session retries the check.
+                logNote("YtDlpManager.update", "check failed — latest release unreachable")
+                return
+            }
+            try {
+                prefs?.edit()
+                    ?.putLong(PREF_LAST_UPDATE_CHECK_MS, System.currentTimeMillis())
+                    ?.apply()
+            } catch (_: Exception) {
+            }
+            val installed = installedVersionTag()
+            if (installed != null && compareVersionTags(installed, latest) >= 0) {
+                logNote(
+                    "YtDlpManager.update",
+                    "up to date: installed=$installed latest=$latest"
+                )
+                updateDone = true
+                return
+            }
+            // A real update exists (or the installed version is
+            // unknown): only NOW does the notification appear, and it
+            // means a download is really starting.
+            logNote(
+                "YtDlpManager.update",
+                "update available: installed=$installed latest=$latest — downloading"
+            )
+            showUpdateNotification(latest)
             try {
                 val r = kotlinx.coroutines.withTimeoutOrNull(120_000) { checkForUpdates() }
                 if (r != null) {
@@ -735,10 +779,48 @@ object YtDlpManager {
                     logNote("YtDlpManager.update", "update timed out (120s) — proceeding with installed version")
                 }
             } finally {
-                updateRunning = false
-                notifJob.cancel()
                 hideUpdateNotification()
             }
+        }
+    }
+
+    /** Installed yt-dlp version as a release tag ("2026.10.21"), or null. */
+    private fun installedVersionTag(): String? {
+        val raw = getYtDlpVersion().trim()
+        return raw.split(" ").firstOrNull {
+            it.matches(Regex("""\d{4}\.\d{1,2}\.\d{1,2}.*"""))
+        }
+    }
+
+    /** Numeric compare of date-based version tags: negative/0/positive. */
+    private fun compareVersionTags(a: String, b: String): Int {
+        val pa = a.split(".").map { it.filter { c -> c.isDigit() }.toIntOrNull() ?: 0 }
+        val pb = b.split(".").map { it.filter { c -> c.isDigit() }.toIntOrNull() ?: 0 }
+        for (i in 0 until maxOf(pa.size, pb.size)) {
+            val x = pa.getOrElse(i) { 0 }
+            val y = pb.getOrElse(i) { 0 }
+            if (x != y) return if (x < y) -1 else 1
+        }
+        return 0
+    }
+
+    /** Latest stable yt-dlp tag from GitHub (one small API call), or null. */
+    private fun fetchLatestYtDlpTag(): String? {
+        return try {
+            val conn = java.net.URL(
+                "https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest"
+            ).openConnection() as java.net.HttpURLConnection
+            conn.connectTimeout = 6000
+            conn.readTimeout = 6000
+            conn.setRequestProperty("User-Agent", "PhoenixDownloader")
+            conn.setRequestProperty("Accept", "application/vnd.github+json")
+            if (conn.responseCode != 200) return null
+            val tag = org.json.JSONObject(
+                conn.inputStream.bufferedReader().readText()
+            ).optString("tag_name", "").trim()
+            tag.ifEmpty { null }
+        } catch (e: Exception) {
+            null
         }
     }
 

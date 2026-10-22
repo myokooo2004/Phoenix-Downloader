@@ -209,6 +209,17 @@ object YouTubeApiClient {
      */
     suspend fun getTrending(regionCode: String = "MM", maxResults: Int = 20, pageToken: String? = null): Result<Pair<List<VideoItem>, String?>> = withContext(Dispatchers.IO) {
         try {
+            // Direct first (2026-10-22): YouTube's own home feed from the
+            // phone — the browser's path. The Worker /trending below
+            // stays as the fallback when the direct call fails or comes
+            // back empty.
+            val direct = DirectYouTube.homeFeed(pageToken)
+            if (direct != null && direct.first.isNotEmpty()) {
+                CrashLogger.logNonFatal(
+                    TAG, Exception("trending served direct n=${direct.first.size}")
+                )
+                return@withContext Result.success(direct)
+            }
             var urlStr = "$WORKER_BASE/trending?region=$regionCode" +
                     "&maxResults=${maxResults.coerceIn(1, 50)}"
             if (pageToken != null) {
@@ -305,6 +316,15 @@ object YouTubeApiClient {
         pageToken: String? = null
     ): Result<Pair<List<VideoItem>, String?>> = withContext(Dispatchers.IO) {
         try {
+            // Direct first (2026-10-22): YouTube's own search from the
+            // phone; the Worker /search below stays as the fallback.
+            val direct = DirectYouTube.search(query, pageToken)
+            if (direct != null && direct.first.isNotEmpty()) {
+                CrashLogger.logNonFatal(
+                    TAG, Exception("search served direct n=${direct.first.size}")
+                )
+                return@withContext Result.success(direct)
+            }
             var urlStr = "$WORKER_BASE/search" +
                     "?q=${java.net.URLEncoder.encode(query, "UTF-8")}" +
                     "&maxResults=${maxResults.coerceIn(1, 50)}"
@@ -383,6 +403,15 @@ object YouTubeApiClient {
         pageToken: String? = null
     ): Result<RelatedPage> = withContext(Dispatchers.IO) {
         try {
+            // Direct first (2026-10-22): YouTube's own Up next from the
+            // phone; the Worker /related below stays as the fallback.
+            val direct = DirectYouTube.related(videoId, pageToken)
+            if (direct != null && direct.first.isNotEmpty()) {
+                CrashLogger.logNonFatal(
+                    TAG, Exception("related served direct n=${direct.first.size}")
+                )
+                return@withContext Result.success(RelatedPage(direct.first, direct.second))
+            }
             var urlStr = "$WORKER_BASE/related" +
                     "?videoId=$videoId" +
                     "&maxResults=${maxResults.coerceIn(1, 50)}"
@@ -445,6 +474,16 @@ object YouTubeApiClient {
      */
     suspend fun getComments(videoId: String, maxResults: Int = 20): Result<List<CommentItem>> = withContext(Dispatchers.IO) {
         try {
+            // Direct first (2026-10-22): the watch page's own comments
+            // continuation from the phone; the Worker/Data API path
+            // below stays as the fallback.
+            val direct = DirectYouTube.comments(videoId)
+            if (!direct.isNullOrEmpty()) {
+                CrashLogger.logNonFatal(
+                    TAG, Exception("comments served direct n=${direct.size}")
+                )
+                return@withContext Result.success(direct)
+            }
             val urlStr = "$WORKER_BASE/comments" +
                     "?videoId=$videoId" +
                     "&maxResults=${maxResults.coerceIn(1, 100)}"

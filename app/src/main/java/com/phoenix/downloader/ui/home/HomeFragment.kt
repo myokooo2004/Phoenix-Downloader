@@ -169,28 +169,27 @@ class HomeFragment : Fragment() {
         if (isLoading) return
         isLoading = true
         viewLifecycleOwner.lifecycleScope.launch {
-            // Mirror first (user field report 2026-10-21): the GitHub-
-            // hosted trending feed is reachable WITHOUT a VPN on networks
-            // that block the Worker's own hosts, and it carries ~120
-            // items, so Home fills and keeps scrolling. The Worker path
-            // below stays as the fallback.
+            // Live first (user direction 2026-10-22): Home = YouTube's
+            // own feed, fetched directly from the phone (getTrending
+            // tries the direct path, then the Worker). The GitHub mirror
+            // below is only a last-resort filler when both live paths
+            // fail — never the primary source.
+            val result = YouTubeApiClient.getTrending("MM", 20, null)
+            if (result.isSuccess) {
+                val (videos, token) = result.getOrNull() ?: Pair(emptyList(), null)
+                if (videos.isNotEmpty()) {
+                    isLoading = false
+                    applyFirstPage(videos, token)
+                    return@launch
+                }
+            }
             val feed = YouTubeApiClient.fetchTrendingFeed()
             if (feed.isNotEmpty()) {
                 isLoading = false
                 applyFirstPage(feed, null)
                 return@launch
             }
-            // Background refresh: whatever is already on screen (disk
-            // cache or bundled snapshot) STAYS if the network fails.
-            val result = YouTubeApiClient.getTrending("MM", 20, null)
             isLoading = false
-            if (result.isSuccess) {
-                val (videos, token) = result.getOrNull() ?: Pair(emptyList(), null)
-                if (videos.isNotEmpty()) {
-                    applyFirstPage(videos, token)
-                    return@launch
-                }
-            }
             if (videoList.isEmpty()) {
                 videoList.addAll(loadBundledTrending())
                 if (videoList.isNotEmpty()) ensureAdapter()
