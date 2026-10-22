@@ -60,57 +60,15 @@ class BrowserFragment : Fragment() {
         // JavaScript bridge for per-video download buttons (Vidmate-style)
         wv.addJavascriptInterface(object {
             @android.webkit.JavascriptInterface
-            fun onDownloadClick(videoUrl: String) {
+            fun onDownloadClick(videoUrl: String, title: String) {
+                // The dialog opens IMMEDIATELY with what the page
+                // already knows (url + title). Until 2026-10-22 this
+                // waited for a full fetchVideoInfo extraction first —
+                // that gate was most of the "Fetching" wait the user
+                // felt. The dialog now fills any gaps (duration, exact
+                // title) in the background while formats load.
                 activity?.runOnUiThread {
-                    viewLifecycleOwner.lifecycleScope.launch {
-                        YtDlpManager.fetchVideoInfo(videoUrl)
-                            .onSuccess { DownloadDialogFragment.newInstance(it.url, it.title).show(parentFragmentManager, "DownloadDialog") }
-                            .onFailure { 
-                                context?.let { ctx ->
-                                    android.widget.Toast.makeText(
-                                        ctx, 
-                                        it.message ?: "Could not fetch video", 
-                                        android.widget.Toast.LENGTH_SHORT
-                                    ).show()
-                                }
-                            }
-                    }
-                }
-            }
-
-            @android.webkit.JavascriptInterface
-            fun onActionClick(action: String, videoUrl: String) {
-                // The injected watch-page action bar (Save / Popup /
-                // Play Audio / Share / Download). Download and Play
-                // Audio open the download dialog; Share uses the
-                // system share sheet; Save/Popup are placeholders,
-                // same as on the native detail page.
-                activity?.runOnUiThread {
-                    when (action) {
-                        "download", "audio" -> onDownloadClick(videoUrl)
-                        "share" -> {
-                            try {
-                                val send = android.content.Intent(
-                                    android.content.Intent.ACTION_SEND
-                                ).apply {
-                                    type = "text/plain"
-                                    putExtra(android.content.Intent.EXTRA_TEXT, videoUrl)
-                                }
-                                activity?.startActivity(
-                                    android.content.Intent.createChooser(send, null)
-                                )
-                            } catch (e: Exception) { /* no share target */ }
-                        }
-                        else -> {
-                            val label = if (action == "save") "Save" else "Popup"
-                            context?.let { ctx ->
-                                android.widget.Toast.makeText(
-                                    ctx, "$label — coming soon",
-                                    android.widget.Toast.LENGTH_SHORT
-                                ).show()
-                            }
-                        }
-                    }
+                    openDownloadDialogNow(videoUrl, title)
                 }
             }
 
@@ -125,24 +83,13 @@ class BrowserFragment : Fragment() {
             }
         }, "PhoenixDownloader")
 
-        // "Video detected — tap to download" pill: the page keeps
-        // playing (browser watch); the pill is the download path for
-        // the current video and opens the download dialog directly.
+        // "Video detected — tap to download" pill: shown on
+        // Facebook / TikTok / Shorts pages (YouTube watch pages have
+        // the injected red DOWNLOAD button instead — no pill there,
+        // user 2026-10-22). Opens the dialog immediately.
         binding.tvDetectHint.setOnClickListener {
             val url = pendingVideoUrl ?: return@setOnClickListener
-            viewLifecycleOwner.lifecycleScope.launch {
-                YtDlpManager.fetchVideoInfo(url)
-                    .onSuccess { DownloadDialogFragment.newInstance(it.url, it.title).show(parentFragmentManager, "DownloadDialog") }
-                    .onFailure { e ->
-                        context?.let { ctx ->
-                            android.widget.Toast.makeText(
-                                ctx,
-                                e.message ?: "Could not fetch video",
-                                android.widget.Toast.LENGTH_SHORT
-                            ).show()
-                        }
-                    }
-            }
+            openDownloadDialogNow(url, binding.webview.title ?: "")
         }
 
         wv.webViewClient = object : WebViewClient() {
@@ -215,19 +162,7 @@ class BrowserFragment : Fragment() {
 
         binding.fabDownload.setOnClickListener {
             val url = pendingVideoUrl ?: return@setOnClickListener
-            viewLifecycleOwner.lifecycleScope.launch {
-                YtDlpManager.fetchVideoInfo(url)
-                    .onSuccess { DownloadDialogFragment.newInstance(it.url, it.title).show(parentFragmentManager, "DownloadDialog") }
-                    .onFailure {
-                        context?.let { ctx ->
-                            android.widget.Toast.makeText(
-                                ctx,
-                                it.message ?: "Could not fetch video",
-                                android.widget.Toast.LENGTH_SHORT
-                            ).show()
-                        }
-                    }
-            }
+            openDownloadDialogNow(url, binding.webview.title ?: "")
         }
 
         val startUrl = requireArguments().getString(ARG_URL).orEmpty()
@@ -253,6 +188,20 @@ class BrowserFragment : Fragment() {
     }
 
     /** Inject a small download icon into each video item (user style). */
+    /**
+     * Open the download dialog NOW with whatever is already known
+     * (url, a best-effort title, a derived thumbnail). No extraction
+     * gates the dialog — the dialog itself loads formats (fast-first
+     * chain) and back-fills title/duration in the background.
+     */
+    private fun openDownloadDialogNow(url: String, title: String) {
+        val id = com.phoenix.downloader.core.YouTubeApiClient.extractVideoId(url)
+        val thumb = if (id != null) "https://i.ytimg.com/vi/$id/hqdefault.jpg" else ""
+        val cleanTitle = title.removeSuffix(" - YouTube").trim()
+        DownloadDialogFragment.newInstance(url, cleanTitle, thumb, 0)
+            .show(parentFragmentManager, "DownloadDialog")
+    }
+
     private fun injectDownloadButtons(webView: WebView) {
         // NOTE: m.youtube.com renders video lists via JS after onPageFinished.
         // This script retries on a timer + MutationObserver, and returns JSON
@@ -274,7 +223,7 @@ class BrowserFragment : Fragment() {
         val js = """
             (function() {
                 try {
-                    var debug = {anchors: 0, matched: 0, added: 0, refreshed: 0, noThumb: 0, inPlayer: 0, noHost: 0, fbAdded: 0, vis: null, err: null};
+                    var debug = {anchors: 0, matched: 0, added: 0, refreshed: 0, noThumb: 0, inPlayer: 0, noHost: 0, fbAdded: 0, hdr: 0, vis: null, err: null};
                     var stats = window._phxStats || (window._phxStats = {added: 0, refreshed: 0, passes: 0});
                     var reported = false;
                     function probeVis(btn) {
@@ -365,21 +314,62 @@ class BrowserFragment : Fragment() {
                                 btn.setAttribute('data-phoenix-btn', '1');
                                 btn.setAttribute('data-vid', vid);
                                 btn.textContent = '⬇';
-                                btn.style.cssText = 'position:absolute;right:30px;bottom:4px;width:40px;height:40px;' +
-                                    'color:#616161;display:flex;align-items:center;justify-content:center;' +
-                                    'font-size:24px;z-index:9999;cursor:pointer;background:transparent;';
+                                btn.style.cssText = 'position:absolute;right:30px;bottom:4px;width:44px;height:44px;' +
+                                    'color:#e62117;display:flex;align-items:center;justify-content:center;' +
+                                    'font-size:28px;font-weight:700;z-index:9999;cursor:pointer;background:transparent;';
                                 btn.addEventListener('click', function(e) {
                                     e.stopPropagation();
                                     e.preventDefault();
                                     var t = e.currentTarget;
                                     var v = t ? t.getAttribute('data-vid') : null;
-                                    if (v) PhoenixDownloader.onDownloadClick('https://www.youtube.com/watch?v=' + v);
+                                    var ttl = '';
+                                    try {
+                                        var h = t.parentElement && t.parentElement.querySelector('h3');
+                                        if (h) ttl = (h.textContent || '').trim();
+                                    } catch (e4) {}
+                                    if (v) PhoenixDownloader.onDownloadClick('https://www.youtube.com/watch?v=' + v, ttl);
                                 }, true);
                                 host.appendChild(btn);
                                 debug.added++; stats.added++;
                                 if (viaFallback) { debug.fbAdded++; stats.fbAdded = (stats.fbAdded || 0) + 1; }
                                 if (!debug.vis) debug.vis = probeVis(btn);
                             }
+                            // Mix / playlist panel header: one red ⬇ at
+                            // the header's right (left of YouTube's own
+                            // share icon) for the CURRENT video — the
+                            // user's VidMate Mix screenshot shows it
+                            // there (2026-10-22).
+                            try {
+                                var panel = document.querySelector('ytm-playlist-panel-renderer');
+                                if (panel && !panel.querySelector('[data-phoenix-hdr]')) {
+                                    var hdr = panel.firstElementChild;
+                                    if (hdr) {
+                                        try {
+                                            if (window.getComputedStyle(hdr).position === 'static') {
+                                                hdr.style.position = 'relative';
+                                            }
+                                        } catch (e5) {}
+                                        var hb = document.createElement('div');
+                                        hb.setAttribute('data-phoenix-hdr', '1');
+                                        hb.textContent = '⬇';
+                                        hb.style.cssText = 'position:absolute;right:52px;top:50%;transform:translateY(-50%);' +
+                                            'width:44px;height:44px;color:#e62117;display:flex;align-items:center;justify-content:center;' +
+                                            'font-size:28px;font-weight:700;z-index:9999;cursor:pointer;background:transparent;';
+                                        hb.addEventListener('click', function(e) {
+                                            e.stopPropagation();
+                                            e.preventDefault();
+                                            var m = location.href.match(/[?&]v=([\w-]{11})/);
+                                            if (m) {
+                                                PhoenixDownloader.onDownloadClick(
+                                                    'https://www.youtube.com/watch?v=' + m[1],
+                                                    document.title.replace(/\s*-\s*YouTube\s*$/, ''));
+                                            }
+                                        }, true);
+                                        hdr.appendChild(hb);
+                                        debug.hdr++;
+                                    }
+                                }
+                            } catch (e6) {}
                         } catch (e) { debug.err = String(e && e.message || e); }
                         return debug;
                     }
@@ -417,89 +407,137 @@ class BrowserFragment : Fragment() {
     }
 
     /**
-     * Inject OUR action bar into YouTube watch pages (user spec
-     * 2026-10-22, from their VidMate screenshots): Save / Popup /
-     * Play Audio / Share / Download — with Download big and red at
-     * the right end, sitting under the video's own metadata like the
-     * detail-page action row did. CEIR-extension model: the page is
-     * YouTube's; this bar is our overlay inside it. Clicks ride the
-     * PhoenixDownloader bridge (onActionClick). The bar re-anchors
-     * itself on SPA navigations (it keys on the current video id),
-     * and reports which anchor matched to the crash log so the field
-     * can verify placement.
+     * Inject OUR download button into YouTube watch pages (user
+     * spec 2026-10-22, final mockup): ONE red pill — a dark-red
+     * circle with a white arrow at the FRONT + "DOWNLOAD" in white —
+     * centered in a plain row under the video's metadata, above the
+     * comments. No other cells, and no native pill on watch pages.
+     * Build 293's bar never appeared in the field because its three
+     * anchors matched nothing on the user's page, so this version
+     * climbs a ladder of anchors and reports a DOM census (which
+     * candidate elements exist) to the crash log: a placement miss
+     * on any layout is diagnosable from ONE log, no guessing.
      */
     private fun injectWatchActions(webView: WebView) {
         val js = """
             (function() {
                 try {
-                    var stats = window._phxBar || (window._phxBar = {added: 0, rebuilt: 0});
+                    var stats = window._phxPill || (window._phxPill = {added: 0, rebuilt: 0, censusSent: false});
+                    var CANDS = ['ytm-slim-video-information-renderer','ytm-video-information-renderer',
+                        'ytm-like-button-renderer','ytm-segmented-like-dislike-button-renderer',
+                        'ytm-comments-entry-point-header-renderer','ytm-comment-section-renderer',
+                        'ytm-expandable-video-description-renderer','ytm-item-section-renderer',
+                        'ytm-compact-video-renderer','ytm-playlist-panel-renderer','#player-container-id','ytm-player'];
                     function currentVid() {
                         var m = location.href.match(/[?&]v=([\w-]{11})/);
                         return m ? m[1] : null;
                     }
-                    function svgStroke(inner) {
-                        return '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#0f0f0f" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' + inner + '</svg>';
+                    function census() {
+                        var c = {};
+                        for (var i = 0; i < CANDS.length; i++) {
+                            try { c[CANDS[i]] = !!document.querySelector(CANDS[i]); } catch (e) { c[CANDS[i]] = false; }
+                        }
+                        return c;
                     }
-                    function svgShare() {
-                        return '<svg viewBox="0 0 24 24" width="24" height="24" fill="#0f0f0f"><path d="M13 4.5L21 12l-8 7.5v-4.2c-5-.3-7.7 1.4-9.6 4.4.3-6.4 3.4-10.3 9.6-11.4z"/></svg>';
+                    function report(obj) {
+                        try {
+                            if (window.PhoenixDownloader && PhoenixDownloader.reportDiag) {
+                                PhoenixDownloader.reportDiag(JSON.stringify(obj));
+                            }
+                        } catch (e) {}
                     }
-                    function svgDownload() {
-                        return '<svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="#e62117" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v11"/><path d="M6.5 9.5L12 15l5.5-5.5"/><path d="M4 20h16"/></svg>';
-                    }
-                    function cell(action, icon, label, color) {
-                        var d = document.createElement('div');
-                        d.setAttribute('data-phx-action', action);
-                        d.style.cssText = 'flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:4px 0;cursor:pointer;';
-                        d.innerHTML = icon + '<span style="font-size:11px;color:' + color + ';' + (action === 'download' ? 'font-weight:700;' : '') + '">' + label + '</span>';
-                        d.addEventListener('click', function(e) {
+                    function buildPill(vid) {
+                        var row = document.createElement('div');
+                        row.id = 'phoenix-dl-row';
+                        row.setAttribute('data-vid', vid);
+                        row.style.cssText = 'display:flex;justify-content:center;background:#ffffff;' +
+                            'border-top:1px solid #eeeeee;border-bottom:1px solid #eeeeee;' +
+                            'padding:11px 0;margin:6px 0;position:relative;z-index:60;';
+                        var pill = document.createElement('span');
+                        pill.style.cssText = 'display:inline-flex;align-items:center;gap:9px;border-radius:999px;' +
+                            'background:linear-gradient(180deg,#f23a2a,#d80f18 55%,#c40d16);' +
+                            'padding:5px 19px 5px 5px;cursor:pointer;' +
+                            'box-shadow:0 3px 8px rgba(216,15,24,.35), inset 0 1px 0 rgba(255,255,255,.35);';
+                        var circ = document.createElement('span');
+                        circ.style.cssText = 'width:28px;height:28px;border-radius:50%;flex:none;' +
+                            'background:radial-gradient(circle at 35% 30%, #c0272d, #7d0a10);' +
+                            'display:flex;align-items:center;justify-content:center;' +
+                            'box-shadow:inset 0 2px 4px rgba(0,0,0,.45);';
+                        circ.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16"><path fill="#ffffff" d="M12 3.5v10.1l3.4-3.4 1.9 1.9L12 17.4l-5.3-5.3 1.9-1.9 3.4 3.4V3.5zM5 19.2h14V21H5z"/></svg>';
+                        var txt = document.createElement('span');
+                        txt.textContent = 'DOWNLOAD';
+                        txt.style.cssText = 'color:#ffffff;font-weight:800;font-size:14px;letter-spacing:.6px;';
+                        pill.appendChild(circ);
+                        pill.appendChild(txt);
+                        pill.addEventListener('click', function(e) {
                             e.stopPropagation();
                             e.preventDefault();
                             var v = currentVid();
-                            if (v && window.PhoenixDownloader && PhoenixDownloader.onActionClick) {
-                                PhoenixDownloader.onActionClick(action, 'https://www.youtube.com/watch?v=' + v);
+                            if (v && window.PhoenixDownloader && PhoenixDownloader.onDownloadClick) {
+                                PhoenixDownloader.onDownloadClick(
+                                    'https://www.youtube.com/watch?v=' + v,
+                                    document.title.replace(/\s*-\s*YouTube\s*$/, ''));
                             }
                         }, true);
-                        return d;
+                        row.appendChild(pill);
+                        return row;
                     }
                     function ensure() {
                         var vid = currentVid();
                         if (!vid) return 'no-vid';
                         if (location.href.indexOf('/watch') < 0) return 'not-watch';
-                        var bar = document.getElementById('phoenix-action-bar');
-                        if (bar && bar.getAttribute('data-vid') === vid) return 'exists';
-                        if (bar) { bar.remove(); stats.rebuilt++; }
-                        var anchorAfter = null, anchorBefore = null, how = '';
+                        var row = document.getElementById('phoenix-dl-row');
+                        if (row && row.getAttribute('data-vid') === vid) return 'exists';
+                        if (row) { row.remove(); stats.rebuilt++; }
+                        var after = null, before = null, how = '';
                         var info = document.querySelector('ytm-slim-video-information-renderer');
-                        if (info) { anchorAfter = info; how = 'info'; }
-                        if (!anchorAfter) {
+                        if (info) { after = info; how = 'slim-info'; }
+                        if (!after) {
+                            var info2 = document.querySelector('ytm-video-information-renderer');
+                            if (info2) { after = info2; how = 'info'; }
+                        }
+                        if (!after) {
                             var like = document.querySelector('ytm-like-button-renderer, ytm-segmented-like-dislike-button-renderer');
-                            if (like && like.parentElement) { anchorAfter = like.parentElement; how = 'like-parent'; }
+                            if (like) {
+                                after = like.closest('ytm-slim-video-information-renderer') ||
+                                    (like.parentElement && like.parentElement.parentElement) ||
+                                    like.parentElement;
+                                how = 'like';
+                            }
                         }
-                        if (!anchorAfter) {
+                        if (!after && !before) {
+                            var desc = document.querySelector('ytm-expandable-video-description-renderer');
+                            if (desc) {
+                                after = desc.closest('ytm-item-section-renderer') || desc;
+                                how = 'description';
+                            }
+                        }
+                        if (!after && !before) {
                             var comments = document.querySelector('ytm-comments-entry-point-header-renderer, ytm-comment-section-renderer');
-                            if (comments) { anchorBefore = comments; how = 'comments'; }
+                            if (comments) {
+                                before = comments.closest('ytm-item-section-renderer') || comments;
+                                how = 'comments';
+                            }
                         }
-                        if (!anchorAfter && !anchorBefore) return 'no-anchor';
-                        bar = document.createElement('div');
-                        bar.id = 'phoenix-action-bar';
-                        bar.setAttribute('data-vid', vid);
-                        bar.style.cssText = 'display:flex;align-items:flex-start;background:#ffffff;border-top:1px solid #e5e5e5;border-bottom:1px solid #e5e5e5;padding:8px 6px;margin:6px 0;position:relative;z-index:50;';
-                        bar.appendChild(cell('save', svgStroke('<rect x="5" y="4" width="14" height="17" rx="2"/><path d="M12 8v6"/><path d="M9 11l3 3 3-3"/>'), 'Save', '#0f0f0f'));
-                        bar.appendChild(cell('popup', svgStroke('<rect x="8" y="9" width="12" height="11" rx="2"/><path d="M16 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>'), 'Popup', '#0f0f0f'));
-                        bar.appendChild(cell('audio', svgStroke('<path d="M4 16v-3a8 8 0 0 1 16 0v3"/><rect x="3" y="15" width="4" height="6" rx="2"/><rect x="17" y="15" width="4" height="6" rx="2"/>'), 'Play Audio', '#0f0f0f'));
-                        bar.appendChild(cell('share', svgShare(), 'Share', '#0f0f0f'));
-                        bar.appendChild(cell('download', svgDownload(), 'Download', '#e62117'));
-                        if (anchorBefore) {
-                            anchorBefore.parentNode.insertBefore(bar, anchorBefore);
+                        if (!after && !before) {
+                            var section = document.querySelector('ytm-item-section-renderer');
+                            if (section) { before = section; how = 'first-section'; }
+                        }
+                        if (!after && !before) {
+                            if (!stats.censusSent) {
+                                stats.censusSent = true;
+                                report({pill: 'no-anchor', vid: vid, census: census()});
+                            }
+                            return 'no-anchor';
+                        }
+                        row = buildPill(vid);
+                        if (before) {
+                            before.parentNode.insertBefore(row, before);
                         } else {
-                            anchorAfter.parentNode.insertBefore(bar, anchorAfter.nextSibling);
+                            after.parentNode.insertBefore(row, after.nextSibling);
                         }
                         stats.added++;
-                        try {
-                            if (window.PhoenixDownloader && PhoenixDownloader.reportDiag) {
-                                PhoenixDownloader.reportDiag(JSON.stringify({bar: 'added', how: how, vid: vid, stats: stats}));
-                            }
-                        } catch (e) {}
+                        report({pill: 'added', how: how, vid: vid, stats: stats});
                         return 'added-' + how;
                     }
                     var r = ensure();
@@ -509,15 +547,15 @@ class BrowserFragment : Fragment() {
                         ensure();
                         if (tries >= 12) clearInterval(timer);
                     }, 1000);
-                    if (!window._phoenixBarObserver && document.body) {
+                    if (!window._phoenixPillObserver && document.body) {
                         try {
-                            window._phoenixBarObserver = new MutationObserver(function() { ensure(); });
-                            window._phoenixBarObserver.observe(document.body, { childList: true, subtree: true });
+                            window._phoenixPillObserver = new MutationObserver(function() { ensure(); });
+                            window._phoenixPillObserver.observe(document.body, { childList: true, subtree: true });
                         } catch (e) {}
                     }
-                    return JSON.stringify({bar: r, stats: stats});
+                    return JSON.stringify({pill: r, stats: stats});
                 } catch (e) {
-                    return JSON.stringify({bar: 'err', err: 'outer: ' + (e && e.message || e)});
+                    return JSON.stringify({pill: 'err', err: 'outer: ' + (e && e.message || e)});
                 }
             })();
         """.trimIndent()
@@ -526,7 +564,7 @@ class BrowserFragment : Fragment() {
                 webView.context?.let { ctx ->
                     com.phoenix.downloader.core.CrashLogger.logNonFatal(
                         ctx,
-                        "BrowserActions",
+                        "BrowserPill",
                         Exception("inject result=$result url=${webView.url}")
                     )
                 }

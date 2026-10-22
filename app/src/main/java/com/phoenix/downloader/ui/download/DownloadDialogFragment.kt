@@ -103,6 +103,7 @@ class DownloadDialogFragment : DialogFragment() {
             .setPositiveButton("OK") { _, _ ->
                 val name = input.text.toString().trim()
                 if (name.isNotEmpty()) {
+                    userRenamed = true
                     displayTitle = name
                     binding.tvDlgTitle.text = name
                 }
@@ -176,43 +177,56 @@ class DownloadDialogFragment : DialogFragment() {
 
     private var shownMaxHeight = -1
     private var shownTierCount = -1
+    private var userRenamed = false
 
     private fun fetchFormats() {
         binding.tvFetching.visibility = View.VISIBLE
         lifecycleScope.launch {
-            // Stage 1 (2026-10-22): the /player metadata list — one
-            // cheap call, so the dialog is usable in ~1-3s instead of
-            // waiting for a full extraction (~17s in the field).
-            var shown = false
-            val fast = try {
-                YtDlpManager.fetchFormatsFast(videoUrl)
-            } catch (e: Exception) {
-                null
-            }
-            if (_binding == null) return@launch
-            if (fast != null && fast.video.isNotEmpty()) {
-                renderFormats(fast)
-                shown = true
-                binding.tvFetching.visibility = View.GONE
-            }
-            // Stage 2: the authoritative yt-dlp extraction. When it
-            // knows more than the advisory list (a real 4K tier, more
-            // tiers), the list upgrades in place.
+            // One fetch: the manager answers from its cache when a
+            // prewarm already paid for the extraction, else runs the
+            // fast-first attempt chain. (The two-stage /player
+            // advisory list from build 293 was removed 2026-10-22 —
+            // anonymous /player serves no formats; the real speed fix
+            // is that this dialog now OPENS instantly instead of
+            // waiting behind a fetchVideoInfo extraction.)
             val result = YtDlpManager.fetchFormats(videoUrl)
             if (_binding == null) return@launch
             binding.tvFetching.visibility = View.GONE
             result.onSuccess { full ->
-                // Upgrade only — never downgrade a richer advisory list.
-                val better = full.maxHeight > shownMaxHeight ||
-                    (full.video.size > shownTierCount && full.maxHeight >= shownMaxHeight)
-                if (!shown || better) renderFormats(full)
-                if (full.video.isEmpty() && !shown) {
+                if (full.video.isEmpty()) {
                     Toast.makeText(requireContext(), "No formats found", Toast.LENGTH_SHORT).show()
+                } else {
+                    renderFormats(full)
                 }
             }.onFailure {
-                if (!shown) {
-                    Toast.makeText(requireContext(), "Failed: ${it.message}", Toast.LENGTH_SHORT).show()
-                }
+                Toast.makeText(requireContext(), "Failed: ${it.message}", Toast.LENGTH_SHORT).show()
+            }
+        }
+        // Dialogs opened straight from a page tap may arrive without
+        // a title/duration — back-fill them in the background.
+        if (videoTitle.isEmpty()) fillInfoInBackground()
+    }
+
+    /** Background info fill for dialogs opened without metadata. */
+    private fun fillInfoInBackground() {
+        lifecycleScope.launch {
+            val info = YtDlpManager.fetchVideoInfo(videoUrl).getOrNull() ?: return@launch
+            if (_binding == null) return@launch
+            if (!userRenamed && displayTitle.isEmpty() && info.title.isNotEmpty()) {
+                displayTitle = info.title
+                videoTitle = info.title
+                binding.tvDlgTitle.text = info.title
+            }
+            val thumb = info.thumbnailUrl
+            if (videoThumbnail.isEmpty() && !thumb.isNullOrEmpty()) {
+                videoThumbnail = thumb
+                Glide.with(this@DownloadDialogFragment).load(thumb).into(binding.ivDlgThumb)
+            }
+            if (videoDuration <= 0 && info.durationSec > 0) {
+                videoDuration = info.durationSec.toInt()
+                val m = videoDuration / 60
+                val s = videoDuration % 60
+                binding.tvDlgDuration.text = "%d:%02d".format(m, s)
             }
         }
     }

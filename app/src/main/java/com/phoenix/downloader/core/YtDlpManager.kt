@@ -105,61 +105,21 @@ object YtDlpManager {
         }
     }
 
-    // ---- Advisory format list (fast, /player metadata) ----
-    // The dialog's first paint: ONE InnerTube /player call (~1-3s)
-    // instead of a full extraction (~17s measured in the field). The
-    // list is advisory — the authoritative extraction still runs
-    // (prewarm / dialog stage 2) and can upgrade it in place.
-    private data class CachedAdvisory(val result: FormatsResult, val atMs: Long)
-
-    private val advisoryCache = object : LinkedHashMap<String, CachedAdvisory>(8, 0.75f, true) {
-        override fun removeEldestEntry(
-            eldest: MutableMap.MutableEntry<String, CachedAdvisory>
-        ): Boolean = size > 8
-    }
-
     /**
-     * Fast advisory formats: the authoritative cache when present,
-     * else the /player metadata list. Never starts an extraction.
+     * Fire-and-forget: fetch formats into the cache in the background
+     * (fast-first attempt chain inside fetchFormats), so the download
+     * dialog usually opens with the list already here. NOTE: the
+     * /player-metadata advisory list that used to run here first was
+     * REMOVED 2026-10-22 — anonymous /player returns no streamingData
+     * for real videos (probed: UNPLAYABLE / LOGIN_REQUIRED), so it
+     * silently never produced a list.
      */
-    suspend fun fetchFormatsFast(url: String): FormatsResult? {
-        cachedFormats(url)?.let { return it }
-        synchronized(advisoryCache) {
-            val hit = advisoryCache[url]
-            if (hit != null &&
-                System.currentTimeMillis() - hit.atMs <= FORMATS_CACHE_TTL_MS
-            ) {
-                return hit.result
-            }
-        }
-        val videoId = YouTubeApiClient.extractVideoId(url) ?: return null
-        val meta = DirectYouTube.playerFormats(videoId) ?: return null
-        if (meta.video.isEmpty()) return null
-        synchronized(advisoryCache) {
-            advisoryCache[url] = CachedAdvisory(meta, System.currentTimeMillis())
-        }
-        logNote(
-            "fetchFormatsFast",
-            "player-meta list url=$url tiers=${meta.video.size} max=${meta.maxHeight}"
-        )
-        return meta
-    }
-
-    /** Fire-and-forget: fetch formats into the cache in the background. */
     fun prewarmFormats(url: String) {
         if (url.isEmpty() || cachedFormats(url) != null) return
         val started = synchronized(formatsInFlight) { formatsInFlight.add(url) }
         if (!started) return
         managerScope.launch {
             try {
-                // Advisory list first (one cheap call) so a dialog
-                // opened seconds later paints instantly; the full
-                // extraction follows in the same flight.
-                try {
-                    fetchFormatsFast(url)
-                } catch (e: Exception) {
-                    // Advisory only — the extraction below is authoritative.
-                }
                 fetchFormats(url)
             } finally {
                 synchronized(formatsInFlight) { formatsInFlight.remove(url) }
@@ -353,6 +313,15 @@ object YtDlpManager {
         try {
             if (!isReady()) return@withContext Result.failure(Exception(notReadyReason()))
             val request = baseRequest(url)
+            // Fast skips (2026-10-22): info needs no watch-page HTML
+            // or manifests either — same first-attempt flags as the
+            // format fetch. (The formats seed below parses whatever
+            // this dump carries; if a video ever needs the full path,
+            // fetchFormats runs its own chain for the dialog.)
+            request.addOption(
+                "--extractor-args",
+                "youtube:player_skip=webpage,configs,initial_data;skip=hls,dash,translated_subs"
+            )
             request.addOption("--dump-json")
             request.addOption("--no-download")
             val response = YoutubeDL.getInstance().execute(request)

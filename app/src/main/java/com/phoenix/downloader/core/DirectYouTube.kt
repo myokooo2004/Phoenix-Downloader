@@ -1,7 +1,6 @@
 package com.phoenix.downloader.core
 
 import android.util.Log
-import com.phoenix.downloader.model.FormatOption
 import com.phoenix.downloader.ui.home.VideoItem
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -447,93 +446,12 @@ object DirectYouTube {
         }
     }
 
-    /**
-     * Format LIST for the download dialog from ONE /player call —
-     * metadata only (itag / height / size; the stream URLs in this
-     * response are never used, they would need the token machinery
-     * anyway). ~1-3s instead of a full yt-dlp extraction. Advisory:
-     * downloads resolve by height intent first for these picks, and
-     * the authoritative extraction can upgrade the list afterwards
-     * (notably when /player omits a 4K tier). Null on any failure.
-     */
-    suspend fun playerFormats(videoId: String): YtDlpManager.FormatsResult? {
-        val body = baseBody()
-            .put("videoId", videoId)
-            .put("contentCheckOk", true)
-            .put("racyCheckOk", true)
-        val root = post("player", body) ?: return null
-        return try {
-            val status = root.optJSONObject("playabilityStatus")?.optString("status", "")
-            if (status != "OK") {
-                Log.w(TAG, "playerFormats playability=$status")
-                return null
-            }
-            val sd = root.optJSONObject("streamingData") ?: return null
-            val all = mutableListOf<JSONObject>()
-            for (key in listOf("adaptiveFormats", "formats")) {
-                val arr = sd.optJSONArray(key) ?: continue
-                for (i in 0 until arr.length()) {
-                    arr.optJSONObject(i)?.let { all.add(it) }
-                }
-            }
-            // One entry per quality tier (same rule as the yt-dlp list):
-            // MP4 sources preferred, then the largest at that height.
-            val bestByHeight = mutableMapOf<Int, FormatOption>()
-            val bestSizeByHeight = mutableMapOf<Int, Long>()
-            var maxHeight = 0
-            for (f in all) {
-                val mime = f.optString("mimeType", "")
-                if (!mime.startsWith("video/")) continue
-                val height = f.optInt("height", 0)
-                if (height <= 0) continue
-                if (height > maxHeight) maxHeight = height
-                val isMp4 = mime.startsWith("video/mp4")
-                val size = f.optString("contentLength", "").toLongOrNull() ?: run {
-                    val durMs = f.optString("approxDurationMs", "0").toLongOrNull() ?: 0L
-                    (f.optLong("bitrate", 0) * durMs) / 8000
-                }
-                val opt = FormatOption(
-                    id = f.optInt("itag", 0).toString(),
-                    label = "${height}P" + if (height >= 720) " HD" else "",
-                    format = if (isMp4) "MP4" else "WebM",
-                    sizeLabel = formatBytes(size),
-                    isAudio = false
-                )
-                val cur = bestByHeight[height]
-                val better = when {
-                    cur == null -> true
-                    isMp4 && cur.format != "MP4" -> true
-                    !isMp4 && cur.format == "MP4" -> false
-                    else -> size > (bestSizeByHeight[height] ?: -1L)
-                }
-                if (better) {
-                    bestByHeight[height] = opt
-                    bestSizeByHeight[height] = size
-                }
-            }
-            if (bestByHeight.isEmpty()) return null
-            val sorted = bestByHeight.values.sortedBy {
-                it.label.filter { c -> c.isDigit() }.toIntOrNull() ?: 0
-            }
-            YtDlpManager.FormatsResult(
-                music = emptyList(),
-                video = sorted,
-                maxHeight = maxHeight,
-                clientUsed = "player-meta"
-            )
-        } catch (e: Exception) {
-            Log.w(TAG, "playerFormats parse failed", e)
-            null
-        }
-    }
-
-    private fun formatBytes(bytes: Long): String = when {
-        bytes <= 0 -> ""
-        bytes >= 1_073_741_824 -> "%.1fGB".format(bytes / 1_073_741_824.0)
-        bytes >= 1_048_576 -> "%.1fMB".format(bytes / 1_048_576.0)
-        bytes >= 1024 -> "%.0fKB".format(bytes / 1024.0)
-        else -> "$bytes B"
-    }
+    // NOTE: a /player-metadata format list (playerFormats) lived here
+    // in build 293 and was removed 2026-10-22: anonymous /player
+    // returns no streamingData for real videos (probed WEB =
+    // UNPLAYABLE, ANDROID_VR = LOGIN_REQUIRED, embed/iOS = errors),
+    // so the list silently never existed. Format lists come from
+    // yt-dlp extractions only (fast-first chain in YtDlpManager).
 
     /**
      * Depth-first hunt for the comments continuation token: it only
