@@ -135,15 +135,32 @@ class SearchEntryFragment : Fragment() {
         val text = raw.trim()
         if (text.isEmpty()) return
         if (looksLikeUrl(text)) {
-            // Pasted link -> download dialog (the existing URL flow).
             val url = if (text.startsWith("http")) text else "https://$text"
-            DownloadDialogFragment.newInstance(url, "Download")
-                .show(requireActivity().supportFragmentManager, "DownloadDialog")
+            if (isVideoSiteUrl(url)) {
+                // Pasted video link -> download dialog (the existing URL flow).
+                DownloadDialogFragment.newInstance(url, "Download")
+                    .show(requireActivity().supportFragmentManager, "DownloadDialog")
+            } else {
+                // Any other address -> open it in the home browser.
+                (activity as? MainActivity)?.showHomeWithUrl(url)
+            }
         } else {
             SearchHistoryStore.add(requireContext(), text)
-            (activity as? MainActivity)?.openSearch(text)
+            // A search is YouTube's own search now (browser-base spec
+            // 2026-10-22): the home browser opens YouTube's results
+            // page for the query — YouTube's flow and ranking, with
+            // our download buttons injected — not the native list.
+            val resultsUrl = "https://m.youtube.com/results?search_query=" +
+                android.net.Uri.encode(text)
+            (activity as? MainActivity)?.showHomeWithUrl(resultsUrl)
         }
     }
+
+    /** True for the video sites whose links go straight to the dialog. */
+    private fun isVideoSiteUrl(url: String): Boolean =
+        url.contains("youtube.com") || url.contains("youtu.be") ||
+            url.contains("facebook.com") || url.contains("fb.watch") ||
+            url.contains("tiktok.com")
 
     private fun looksLikeUrl(text: String): Boolean =
         text.startsWith("http://") || text.startsWith("https://") ||

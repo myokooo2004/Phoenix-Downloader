@@ -49,6 +49,13 @@ class BrowserFragment : Fragment() {
 
     @SuppressLint("SetJavaScriptEnabled", "AddJavascriptInterface")
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+        // Home mode (2026-10-22 browser-base spec): the browser IS the
+        // home screen, hosted under OUR top bar — its own toolbar and
+        // bottom bar stay hidden; the page is YouTube itself.
+        if (arguments?.getBoolean(ARG_HOME) == true) {
+            binding.toolbarBrowser.visibility = View.GONE
+            binding.bottomBar.visibility = View.GONE
+        }
         val wv = binding.webview
         wv.settings.javaScriptEnabled = true
         wv.settings.domStorageEnabled = true
@@ -118,6 +125,8 @@ class BrowserFragment : Fragment() {
                 injectDownloadButtons(view)
                 // Inject our action bar on YouTube watch pages
                 injectWatchActions(view)
+                // Page chrome: hide YouTube's own header everywhere
+                injectPageStyle(view)
             }
 
             override fun doUpdateVisitedHistory(view: WebView, url: String, isReload: Boolean) {
@@ -127,6 +136,7 @@ class BrowserFragment : Fragment() {
                 // Re-inject per-video download buttons after SPA navigation
                 injectDownloadButtons(view)
                 injectWatchActions(view)
+                injectPageStyle(view)
             }
         }
         wv.webChromeClient = object : WebChromeClient() {
@@ -225,6 +235,7 @@ class BrowserFragment : Fragment() {
                 try {
                     var debug = {anchors: 0, matched: 0, added: 0, refreshed: 0, noThumb: 0, inPlayer: 0, noHost: 0, fbAdded: 0, hdr: 0, vis: null, err: null};
                     var stats = window._phxStats || (window._phxStats = {added: 0, refreshed: 0, passes: 0});
+                    var DL_ICON = '<svg viewBox="0 0 24 24" width="27" height="27" fill="none" stroke="#e62117" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.8v10.7"/><path d="M6.6 9.9 12 15.3l5.4-5.4"/><path d="M4 15v3.6A2.4 2.4 0 0 0 6.4 21h11.2A2.4 2.4 0 0 0 20 18.6V15"/></svg>';
                     var reported = false;
                     function probeVis(btn) {
                         try {
@@ -275,9 +286,60 @@ class BrowserFragment : Fragment() {
                         }
                         return best;
                     }
+                    function styleItem(host) {
+                        // Rounded thumbnail + YouTube's own view count
+                        // ON the thumbnail (user mockups v5/v6
+                        // 2026-10-22). Big cards get the inset look and
+                        // the views badge; small rows just get rounded
+                        // corners. Counted in stats (log proof).
+                        try {
+                            var img = host.querySelector('img');
+                            if (!img) return;
+                            var box = img.closest('a') || img.parentElement;
+                            if (!box) return;
+                            var big = false;
+                            try { big = box.getBoundingClientRect().width > 250; } catch (e) {}
+                            if (!box.hasAttribute('data-phoenix-round')) {
+                                box.setAttribute('data-phoenix-round', '1');
+                                try {
+                                    if (window.getComputedStyle(box).position === 'static') {
+                                        box.style.position = 'relative';
+                                    }
+                                } catch (e) {}
+                                box.style.borderRadius = big ? '18px' : '10px';
+                                box.style.overflow = 'hidden';
+                                if (big) {
+                                    box.style.marginLeft = '10px';
+                                    box.style.marginRight = '10px';
+                                }
+                                stats.rounded = (stats.rounded || 0) + 1;
+                                debug.rounded = (debug.rounded || 0) + 1;
+                            }
+                            if (big) {
+                                var m = (host.textContent || '').match(/([\d.,]+\s*[KMB]?\s*views?)/i);
+                                var badge = box.querySelector('[data-phoenix-views]');
+                                if (m) {
+                                    var txt = m[1].replace(/\s+/g, ' ').trim();
+                                    if (!badge) {
+                                        badge = document.createElement('span');
+                                        badge.setAttribute('data-phoenix-views', '1');
+                                        badge.style.cssText = 'position:absolute;left:10px;bottom:8px;color:#fff;' +
+                                            'font-size:12.5px;font-weight:500;text-shadow:0 1px 4px rgba(0,0,0,.7);' +
+                                            'z-index:60;pointer-events:none;';
+                                        box.appendChild(badge);
+                                        stats.views = (stats.views || 0) + 1;
+                                        debug.views = (debug.views || 0) + 1;
+                                    }
+                                    if (badge.textContent !== txt) badge.textContent = txt;
+                                } else if (badge) {
+                                    badge.remove();
+                                }
+                            }
+                        } catch (e) {}
+                    }
                     function addButtons() {
                         stats.passes++;
-                        debug.added = 0; debug.refreshed = 0;
+                        debug.added = 0; debug.refreshed = 0; debug.rounded = 0; debug.views = 0;
                         try {
                             var links = document.querySelectorAll('a[href*="watch"]');
                             debug.anchors = links.length;
@@ -300,6 +362,7 @@ class BrowserFragment : Fragment() {
                                 var existing = host.querySelector('[data-phoenix-btn]');
                                 if (existing) {
                                     // Recycled row: refresh the target video
+                                    if (existing.getAttribute('data-vid') !== vid) styleItem(host);
                                     existing.setAttribute('data-vid', vid);
                                     debug.refreshed++; stats.refreshed++;
                                     if (!debug.vis) debug.vis = probeVis(existing);
@@ -313,10 +376,10 @@ class BrowserFragment : Fragment() {
                                 var btn = document.createElement('div');
                                 btn.setAttribute('data-phoenix-btn', '1');
                                 btn.setAttribute('data-vid', vid);
-                                btn.textContent = '⬇';
+                                btn.innerHTML = DL_ICON;
                                 btn.style.cssText = 'position:absolute;right:30px;bottom:4px;width:44px;height:44px;' +
-                                    'color:#e62117;display:flex;align-items:center;justify-content:center;' +
-                                    'font-size:28px;font-weight:700;z-index:9999;cursor:pointer;background:transparent;';
+                                    'display:flex;align-items:center;justify-content:center;' +
+                                    'z-index:9999;cursor:pointer;background:transparent;';
                                 btn.addEventListener('click', function(e) {
                                     e.stopPropagation();
                                     e.preventDefault();
@@ -330,6 +393,7 @@ class BrowserFragment : Fragment() {
                                     if (v) PhoenixDownloader.onDownloadClick('https://www.youtube.com/watch?v=' + v, ttl);
                                 }, true);
                                 host.appendChild(btn);
+                                styleItem(host);
                                 debug.added++; stats.added++;
                                 if (viaFallback) { debug.fbAdded++; stats.fbAdded = (stats.fbAdded || 0) + 1; }
                                 if (!debug.vis) debug.vis = probeVis(btn);
@@ -351,10 +415,10 @@ class BrowserFragment : Fragment() {
                                         } catch (e5) {}
                                         var hb = document.createElement('div');
                                         hb.setAttribute('data-phoenix-hdr', '1');
-                                        hb.textContent = '⬇';
+                                        hb.innerHTML = DL_ICON;
                                         hb.style.cssText = 'position:absolute;right:52px;top:50%;transform:translateY(-50%);' +
-                                            'width:44px;height:44px;color:#e62117;display:flex;align-items:center;justify-content:center;' +
-                                            'font-size:28px;font-weight:700;z-index:9999;cursor:pointer;background:transparent;';
+                                            'width:44px;height:44px;display:flex;align-items:center;justify-content:center;' +
+                                            'z-index:9999;cursor:pointer;background:transparent;';
                                         hb.addEventListener('click', function(e) {
                                             e.stopPropagation();
                                             e.preventDefault();
@@ -400,6 +464,65 @@ class BrowserFragment : Fragment() {
                         ctx,
                         "BrowserButtons",
                         Exception("inject result=$result url=${webView.url}")
+                    )
+                }
+            } catch (e: Exception) { /* diagnostics only */ }
+        }
+    }
+
+    /**
+     * Hide YouTube's own header on EVERY page (user spec 2026-10-22:
+     * the logo icon, the "YouTube" wordmark, the Open App button, the
+     * search button and the three dots — shown nowhere). One style
+     * tag, re-applied after SPA navigations. Which candidate actually
+     * matched (or the all-false census) is reported once per page, so
+     * a miss is diagnosable from the log instead of guessed.
+     */
+    private fun injectPageStyle(webView: WebView) {
+        val js = """
+            (function() {
+                try {
+                    var CANDS = ['ytm-header', 'header', '#header', 'ytm-mobile-topbar-renderer', '#mobile-topbar'];
+                    var matched = null;
+                    var census = {};
+                    for (var i = 0; i < CANDS.length; i++) {
+                        census[CANDS[i]] = !!document.querySelector(CANDS[i]);
+                        if (!matched && census[CANDS[i]]) matched = CANDS[i];
+                    }
+                    var st = document.getElementById('phoenix-page-style');
+                    if (!st) {
+                        st = document.createElement('style');
+                        st.id = 'phoenix-page-style';
+                        st.textContent = CANDS.join(',') + ' { display: none !important; }';
+                        (document.head || document.documentElement).appendChild(st);
+                    }
+                    if (!window._phoenixChromeSent) window._phoenixChromeSent = {};
+                    var key = 'chrome:' + location.href.split('&')[0];
+                    if (!window._phoenixChromeSent[key]) {
+                        window._phoenixChromeSent[key] = 1;
+                        try {
+                            if (window.PhoenixDownloader && PhoenixDownloader.reportDiag) {
+                                PhoenixDownloader.reportDiag(JSON.stringify({
+                                    chrome: {header: matched || 'none'},
+                                    census: census,
+                                    href: location.href
+                                }));
+                            }
+                        } catch (e) {}
+                    }
+                    return JSON.stringify({header: matched || 'none'});
+                } catch (e) {
+                    return JSON.stringify({err: 'outer: ' + (e && e.message || e)});
+                }
+            })();
+        """.trimIndent()
+        webView.evaluateJavascript(js) { result ->
+            try {
+                webView.context?.let { ctx ->
+                    com.phoenix.downloader.core.CrashLogger.logNonFatal(
+                        ctx,
+                        "BrowserChrome",
+                        Exception("style result=$result url=${webView.url}")
                     )
                 }
             } catch (e: Exception) { /* diagnostics only */ }
@@ -657,10 +780,20 @@ class BrowserFragment : Fragment() {
         super.onDestroyView()
     }
 
+    /** Load a url in this browser (used by the home host fragment). */
+    fun navigate(url: String) {
+        if (_binding != null) binding.webview.loadUrl(url)
+    }
+
     companion object {
         private const val ARG_URL = "url"
-        fun newInstance(url: String) = BrowserFragment().apply {
-            arguments = Bundle().apply { putString(ARG_URL, url) }
+        private const val ARG_HOME = "home_mode"
+
+        fun newInstance(url: String, homeMode: Boolean = false) = BrowserFragment().apply {
+            arguments = Bundle().apply {
+                putString(ARG_URL, url)
+                putBoolean(ARG_HOME, homeMode)
+            }
         }
     }
 }

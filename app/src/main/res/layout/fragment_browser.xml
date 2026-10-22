@@ -8,6 +8,7 @@
 
     <!-- Toolbar -->
     <LinearLayout
+        android:id="@+id/toolbar_browser"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
@@ -121,6 +122,7 @@
 
     <!-- Bottom browser bar -->
     <LinearLayout
+        android:id="@+id/bottom_bar"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"

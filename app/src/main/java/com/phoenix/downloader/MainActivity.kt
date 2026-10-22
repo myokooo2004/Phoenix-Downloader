@@ -9,7 +9,6 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import com.phoenix.downloader.databinding.ActivityMainBinding
 import com.phoenix.downloader.ui.downloads.DownloadsFragment
-import com.phoenix.downloader.ui.home.HomeFragment
 import com.phoenix.downloader.ui.player.PlayerFragment
 
 class MainActivity : AppCompatActivity() {
@@ -87,7 +86,41 @@ class MainActivity : AppCompatActivity() {
     }
 
     fun showHome() {
-        supportFragmentManager.beginTransaction().replace(R.id.nav_host, HomeFragment()).commit()
+        // Home is the browser-base screen since 2026-10-22 (user
+        // spec): our top bar over YouTube itself in the in-app
+        // browser. The old native HomeFragment stays in the tree,
+        // unrouted.
+        supportFragmentManager.beginTransaction()
+            .replace(R.id.nav_host, com.phoenix.downloader.ui.home.HomeBrowserFragment())
+            .commit()
+        if (binding.bottomNav.selectedItemId != R.id.nav_home) {
+            suppressNavListener = true
+            binding.bottomNav.selectedItemId = R.id.nav_home
+            suppressNavListener = false
+        }
+    }
+
+    /**
+     * Land on Home with the embedded browser already navigating to
+     * [url] (search submits: a query becomes YouTube's own results
+     * page — YouTube's flow, not a native list). Pops any pushed
+     * screen (e.g. the search entry) first.
+     */
+    fun showHomeWithUrl(url: String) {
+        if (supportFragmentManager.backStackEntryCount > 0) {
+            supportFragmentManager.popBackStackImmediate()
+        }
+        val current = supportFragmentManager.findFragmentById(R.id.nav_host)
+        if (current is com.phoenix.downloader.ui.home.HomeBrowserFragment) {
+            current.navigate(url)
+        } else {
+            supportFragmentManager.beginTransaction()
+                .replace(
+                    R.id.nav_host,
+                    com.phoenix.downloader.ui.home.HomeBrowserFragment.newInstance(url)
+                )
+                .commit()
+        }
         if (binding.bottomNav.selectedItemId != R.id.nav_home) {
             suppressNavListener = true
             binding.bottomNav.selectedItemId = R.id.nav_home
