@@ -411,12 +411,17 @@ class BrowserFragment : Fragment() {
      * spec 2026-10-22, final mockup): ONE red pill — a dark-red
      * circle with a white arrow at the FRONT + "DOWNLOAD" in white —
      * centered in a plain row under the video's metadata, above the
-     * comments. No other cells, and no native pill on watch pages.
-     * Build 293's bar never appeared in the field because its three
-     * anchors matched nothing on the user's page, so this version
-     * climbs a ladder of anchors and reports a DOM census (which
-     * candidate elements exist) to the crash log: a placement miss
-     * on any layout is diagnosable from ONE log, no guessing.
+     * comments.
+     *
+     * Placement, second attempt (field log 2026-10-22 12:33): the
+     * 2026 watch layout uses NONE of the classic renderer tags (the
+     * census came back all-false), so tag-name anchors alone cannot
+     * work. The ladder now ends in STRUCTURAL anchors that exist on
+     * every watch page: the title heading's block, the Subscribe
+     * button's block, and the first up-next card (found the same
+     * way the proven ⬇ injector finds its hosts). The census is
+     * reported LATE (after the page has actually rendered) and
+     * includes the structural probes.
      */
     private fun injectWatchActions(webView: WebView) {
         val js = """
@@ -427,7 +432,9 @@ class BrowserFragment : Fragment() {
                         'ytm-like-button-renderer','ytm-segmented-like-dislike-button-renderer',
                         'ytm-comments-entry-point-header-renderer','ytm-comment-section-renderer',
                         'ytm-expandable-video-description-renderer','ytm-item-section-renderer',
-                        'ytm-compact-video-renderer','ytm-playlist-panel-renderer','#player-container-id','ytm-player'];
+                        'ytm-compact-video-renderer','ytm-playlist-panel-renderer','#player-container-id',
+                        'ytm-player','h1','ytm-button-renderer','ytm-watch'];
+                    var RENDERERS = 'ytm-video-with-context-renderer,ytm-media-item,ytm-compact-video-renderer,ytm-playlist-video-renderer,ytm-playlist-panel-video-renderer,ytd-rich-item-renderer,ytd-video-renderer,ytd-compact-video-renderer';
                     function currentVid() {
                         var m = location.href.match(/[?&]v=([\w-]{11})/);
                         return m ? m[1] : null;
@@ -482,70 +489,127 @@ class BrowserFragment : Fragment() {
                         row.appendChild(pill);
                         return row;
                     }
+                    // Structural: climb from a known-present element to
+                    // the block that wraps the whole metadata zone.
+                    function climbBlock(el, maxDepth) {
+                        var node = el;
+                        for (var d = 0; d < maxDepth && node && node.parentElement; d++) {
+                            node = node.parentElement;
+                            if (!node || node === document.body) break;
+                            var r = node.getBoundingClientRect();
+                            if (r.width > window.innerWidth * 0.85 && node.querySelectorAll('button, [role="button"]').length >= 2) {
+                                return node;
+                            }
+                        }
+                        return el.parentElement || el;
+                    }
+                    function firstUpNextHost(vid) {
+                        var links = document.querySelectorAll('a[href*="watch"]');
+                        for (var i = 0; i < links.length; i++) {
+                            var href = links[i].getAttribute('href') || '';
+                            var m = href.match(/[?&]v=([\w-]{11})/);
+                            if (!m || m[1] === vid) continue;
+                            var host = links[i].closest(RENDERERS);
+                            if (host) return host.closest('ytm-item-section-renderer') || host;
+                            // climb to the card: ancestors with exactly one video
+                            var node = links[i], best = null;
+                            for (var d = 0; d < 8 && node && node !== document.body; d++) {
+                                node = node.parentElement;
+                                if (!node) break;
+                                if (!node.querySelector('img')) continue;
+                                var as = node.querySelectorAll('a[href*="watch"]');
+                                var seen = {}, distinct = 0;
+                                for (var j = 0; j < as.length; j++) {
+                                    var mm = (as[j].getAttribute('href') || '').match(/[?&]v=([\w-]{11})/);
+                                    if (mm && !seen[mm[1]]) { seen[mm[1]] = 1; distinct++; }
+                                }
+                                if (distinct === 1) { best = node; continue; }
+                                if (distinct > 1) break;
+                            }
+                            if (best) return best;
+                        }
+                        return null;
+                    }
                     function ensure() {
-                        var vid = currentVid();
-                        if (!vid) return 'no-vid';
-                        if (location.href.indexOf('/watch') < 0) return 'not-watch';
-                        var row = document.getElementById('phoenix-dl-row');
-                        if (row && row.getAttribute('data-vid') === vid) return 'exists';
-                        if (row) { row.remove(); stats.rebuilt++; }
-                        var after = null, before = null, how = '';
-                        var info = document.querySelector('ytm-slim-video-information-renderer');
-                        if (info) { after = info; how = 'slim-info'; }
-                        if (!after) {
-                            var info2 = document.querySelector('ytm-video-information-renderer');
-                            if (info2) { after = info2; how = 'info'; }
-                        }
-                        if (!after) {
-                            var like = document.querySelector('ytm-like-button-renderer, ytm-segmented-like-dislike-button-renderer');
-                            if (like) {
-                                after = like.closest('ytm-slim-video-information-renderer') ||
-                                    (like.parentElement && like.parentElement.parentElement) ||
-                                    like.parentElement;
-                                how = 'like';
+                        try {
+                            var vid = currentVid();
+                            if (!vid) return 'no-vid';
+                            if (location.href.indexOf('/watch') < 0) return 'not-watch';
+                            var row = document.getElementById('phoenix-dl-row');
+                            if (row && row.getAttribute('data-vid') === vid) return 'exists';
+                            if (row) { row.remove(); stats.rebuilt++; }
+                            var after = null, before = null, how = '';
+                            var info = document.querySelector('ytm-slim-video-information-renderer');
+                            if (info) { after = info; how = 'slim-info'; }
+                            if (!after) {
+                                var info2 = document.querySelector('ytm-video-information-renderer');
+                                if (info2) { after = info2; how = 'info'; }
                             }
-                        }
-                        if (!after && !before) {
-                            var desc = document.querySelector('ytm-expandable-video-description-renderer');
-                            if (desc) {
-                                after = desc.closest('ytm-item-section-renderer') || desc;
-                                how = 'description';
+                            if (!after) {
+                                var like = document.querySelector('ytm-like-button-renderer, ytm-segmented-like-dislike-button-renderer');
+                                if (like) {
+                                    after = like.closest('ytm-slim-video-information-renderer') || climbBlock(like, 5);
+                                    how = 'like';
+                                }
                             }
-                        }
-                        if (!after && !before) {
-                            var comments = document.querySelector('ytm-comments-entry-point-header-renderer, ytm-comment-section-renderer');
-                            if (comments) {
-                                before = comments.closest('ytm-item-section-renderer') || comments;
-                                how = 'comments';
+                            if (!after && !before) {
+                                var h1 = document.querySelector('h1');
+                                if (h1 && (h1.textContent || '').trim().length > 0) {
+                                    after = climbBlock(h1, 6);
+                                    how = 'title-block';
+                                }
                             }
-                        }
-                        if (!after && !before) {
-                            var section = document.querySelector('ytm-item-section-renderer');
-                            if (section) { before = section; how = 'first-section'; }
-                        }
-                        if (!after && !before) {
-                            if (!stats.censusSent) {
-                                stats.censusSent = true;
-                                report({pill: 'no-anchor', vid: vid, census: census()});
+                            if (!after && !before) {
+                                var btns = document.querySelectorAll('button, [role="button"], ytm-button-renderer');
+                                for (var b = 0; b < btns.length; b++) {
+                                    if ((btns[b].textContent || '').trim() === 'Subscribe') {
+                                        after = climbBlock(btns[b], 6);
+                                        how = 'subscribe-block';
+                                        break;
+                                    }
+                                }
                             }
-                            return 'no-anchor';
+                            if (!after && !before) {
+                                var desc = document.querySelector('ytm-expandable-video-description-renderer');
+                                if (desc) {
+                                    after = desc.closest('ytm-item-section-renderer') || desc;
+                                    how = 'description';
+                                }
+                            }
+                            if (!after && !before) {
+                                var comments = document.querySelector('ytm-comments-entry-point-header-renderer, ytm-comment-section-renderer');
+                                if (comments) {
+                                    before = comments.closest('ytm-item-section-renderer') || comments;
+                                    how = 'comments';
+                                }
+                            }
+                            if (!after && !before) {
+                                var up = firstUpNextHost(vid);
+                                if (up) { before = up; how = 'upnext'; }
+                            }
+                            if (!after && !before) return 'no-anchor';
+                            row = buildPill(vid);
+                            var parent = before ? before.parentNode : after.parentNode;
+                            if (!parent) return 'no-parent';
+                            if (before) parent.insertBefore(row, before);
+                            else parent.insertBefore(row, after.nextSibling);
+                            stats.added++;
+                            report({pill: 'added', how: how, vid: vid, stats: stats});
+                            return 'added-' + how;
+                        } catch (e) {
+                            return 'err: ' + (e && e.message || e);
                         }
-                        row = buildPill(vid);
-                        if (before) {
-                            before.parentNode.insertBefore(row, before);
-                        } else {
-                            after.parentNode.insertBefore(row, after.nextSibling);
-                        }
-                        stats.added++;
-                        report({pill: 'added', how: how, vid: vid, stats: stats});
-                        return 'added-' + how;
                     }
                     var r = ensure();
                     var tries = 0;
                     var timer = setInterval(function() {
                         tries++;
-                        ensure();
-                        if (tries >= 12) clearInterval(timer);
+                        var rr = ensure();
+                        if (tries === 6 && rr === 'no-anchor' && !stats.censusSent) {
+                            stats.censusSent = true;
+                            report({pill: 'no-anchor-late', vid: currentVid(), census: census()});
+                        }
+                        if (tries >= 30) clearInterval(timer);
                     }, 1000);
                     if (!window._phoenixPillObserver && document.body) {
                         try {

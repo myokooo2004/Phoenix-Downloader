@@ -95,10 +95,23 @@ object YtDlpManager {
             }
         }
 
+    /**
+     * Format-cache key: the VIDEO ID when the url carries one, else
+     * the url itself. Field bug 2026-10-22: the browser prewarms with
+     * the page url (m.youtube.com) while the dialog asks with the
+     * bridge-built url (www.youtube.com) — keyed by raw url, the
+     * dialog MISSED the prewarmed cache and paid a second full
+     * extraction. Id-keying makes every spelling of the same video
+     * share one entry.
+     */
+    private fun formatsKey(url: String): String =
+        YouTubeApiClient.extractVideoId(url)?.let { "vid:$it" } ?: url
+
     private fun cachedFormats(url: String): FormatsResult? = synchronized(formatsCache) {
-        val hit = formatsCache[url] ?: return null
+        val key = formatsKey(url)
+        val hit = formatsCache[key] ?: return null
         if (System.currentTimeMillis() - hit.atMs > FORMATS_CACHE_TTL_MS) {
-            formatsCache.remove(url)
+            formatsCache.remove(key)
             null
         } else {
             hit.result
@@ -116,13 +129,14 @@ object YtDlpManager {
      */
     fun prewarmFormats(url: String) {
         if (url.isEmpty() || cachedFormats(url) != null) return
-        val started = synchronized(formatsInFlight) { formatsInFlight.add(url) }
+        val key = formatsKey(url)
+        val started = synchronized(formatsInFlight) { formatsInFlight.add(key) }
         if (!started) return
         managerScope.launch {
             try {
                 fetchFormats(url)
             } finally {
-                synchronized(formatsInFlight) { formatsInFlight.remove(url) }
+                synchronized(formatsInFlight) { formatsInFlight.remove(key) }
             }
         }
     }
@@ -313,15 +327,6 @@ object YtDlpManager {
         try {
             if (!isReady()) return@withContext Result.failure(Exception(notReadyReason()))
             val request = baseRequest(url)
-            // Fast skips (2026-10-22): info needs no watch-page HTML
-            // or manifests either — same first-attempt flags as the
-            // format fetch. (The formats seed below parses whatever
-            // this dump carries; if a video ever needs the full path,
-            // fetchFormats runs its own chain for the dialog.)
-            request.addOption(
-                "--extractor-args",
-                "youtube:player_skip=webpage,configs,initial_data;skip=hls,dash,translated_subs"
-            )
             request.addOption("--dump-json")
             request.addOption("--no-download")
             val response = YoutubeDL.getInstance().execute(request)
@@ -337,7 +342,7 @@ object YtDlpManager {
                 val seeded = parseFormatsJson(json, null, response.err ?: "", url)
                 if (seeded.video.isNotEmpty() || seeded.music.isNotEmpty()) {
                     synchronized(formatsCache) {
-                        formatsCache[url] =
+                        formatsCache[formatsKey(url)] =
                             CachedFormats(seeded, System.currentTimeMillis())
                     }
                     logNote(
@@ -391,34 +396,33 @@ object YtDlpManager {
             // wait on a slow network. The baked-in yt-dlp is the latest
             // stable, so proceeding at once never runs an old version.
             managerScope.launch { ensureUpdated() }
-            // Attempt order (fast-first, 2026-10-22): the first attempt
-            // skips the watch-page HTML (~1MB), client configs and the
-            // DASH/HLS manifests — the bytes dominate on a slow link.
-            // It is only accepted with a plausible coverage (maxHeight
-            // >= 720); anything less falls through to the proven chain
-            // (default, then tv / web_safari on failure).
-            val attempts = listOf(null to true, null to false, "tv" to false, "web_safari" to false)
+            // Attempt order: default, then tv / web_safari on failure.
+            // A webpage-skipping "fast" attempt ran first in build
+            // 293-295 and is REMOVED (field log 2026-10-22 12:33):
+            // with no webpage there is no Visitor Data, the web
+            // client's PO token cannot be minted, and the attempt
+            // died with "Sign in to confirm you're not a bot" — a
+            // full wasted run before the default attempt succeeded.
+            val attempts = listOf<String?>(null, "tv", "web_safari")
             var lastError: Exception? = null
-            for ((client, fast) in attempts) {
+            for (client in attempts) {
                 try {
-                    val attempt = fetchFormatsOnce(url, client, fast)
-                    val usable = attempt.video.isNotEmpty() || attempt.music.isNotEmpty()
-                    val coverageOk = !fast || attempt.maxHeight >= 720
-                    if (usable && coverageOk) {
+                    val attempt = fetchFormatsOnce(url, client)
+                    if (attempt.video.isNotEmpty() || attempt.music.isNotEmpty()) {
                         synchronized(formatsCache) {
-                            formatsCache[url] =
+                            formatsCache[formatsKey(url)] =
                                 CachedFormats(attempt, System.currentTimeMillis())
                         }
                         return@withContext Result.success(attempt)
                     }
                     lastError = Exception(
-                        "client=${client ?: "default"} fast=$fast returned no formats"
+                        "client=${client ?: "default"} returned no formats"
                     )
                 } catch (e: Exception) {
                     lastError = e
                     logNote(
                         "fetchFormats.attempt",
-                        "client=${client ?: "default"} fast=$fast failed: ${e.message}"
+                        "client=${client ?: "default"} failed: ${e.message}"
                     )
                 }
             }
@@ -431,24 +435,13 @@ object YtDlpManager {
 
     private suspend fun fetchFormatsOnce(
         url: String,
-        client: String?,
-        fast: Boolean = false
+        client: String?
     ): FormatsResult =
         withContext(Dispatchers.IO) {
             val request = baseRequest(url)
-            val args = StringBuilder("youtube:")
-            var hasArgs = false
-            fun arg(s: String) {
-                if (hasArgs) args.append(';')
-                args.append(s)
-                hasArgs = true
+            if (client != null) {
+                request.addOption("--extractor-args", "youtube:player_client=$client")
             }
-            if (client != null) arg("player_client=$client")
-            if (fast) {
-                arg("player_skip=webpage,configs,initial_data")
-                arg("skip=hls,dash,translated_subs")
-            }
-            if (hasArgs) request.addOption("--extractor-args", args.toString())
             request.addOption("--dump-json")
             request.addOption("--no-download")
             val response = YoutubeDL.getInstance().execute(request)
@@ -652,7 +645,7 @@ object YtDlpManager {
                         return@withContext Result.success(fromCache)
                     }
                 }
-                val inFlight = synchronized(formatsInFlight) { url in formatsInFlight }
+                val inFlight = synchronized(formatsInFlight) { formatsKey(url) in formatsInFlight }
                 if (!inFlight || waitedMs >= 30_000L) break
                 delay(500)
                 waitedMs += 500
