@@ -38,6 +38,15 @@ class BrowserFragment : Fragment() {
 
     private var _binding: FragmentBrowserBinding? = null
     private val binding get() = _binding!!
+
+    /** Host hooks (set by HomeBrowserFragment in home mode): page URL
+     *  changes and WebView scroll position, for the top-bar
+     *  auto-hide behavior. Null in the standalone browser. */
+    var onHostUrlChanged: ((String) -> Unit)? = null
+    var onHostScroll: ((Int) -> Unit)? = null
+
+    /** The WebView's current URL, if the view exists. */
+    fun currentUrl(): String? = if (_binding != null) binding.webview.url else null
     private var pendingVideoUrl: String? = null
 
     override fun onCreateView(
@@ -55,6 +64,10 @@ class BrowserFragment : Fragment() {
         if (arguments?.getBoolean(ARG_HOME) == true) {
             binding.toolbarBrowser.visibility = View.GONE
             binding.bottomBar.visibility = View.GONE
+        }
+        // Host scroll feed (top-bar auto-hide in the home host).
+        binding.webview.setOnScrollChangeListener { _, _, scrollY, _, _ ->
+            onHostScroll?.invoke(scrollY)
         }
         val wv = binding.webview
         wv.settings.javaScriptEnabled = true
@@ -108,6 +121,7 @@ class BrowserFragment : Fragment() {
             override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
                 binding.tvUrl.text = url
                 checkForVideo(url)
+                onHostUrlChanged?.invoke(url)
             }
 
             override fun onPageFinished(view: WebView, url: String) {
@@ -133,6 +147,7 @@ class BrowserFragment : Fragment() {
                 // Catches SPA pushState/replaceState navigations
                 binding.tvUrl.text = url
                 checkForVideo(url)
+                onHostUrlChanged?.invoke(url)
                 // Re-inject per-video download buttons after SPA navigation
                 injectDownloadButtons(view)
                 injectWatchActions(view)
@@ -347,6 +362,10 @@ class BrowserFragment : Fragment() {
                             } catch (e) {}
                             box.style.borderRadius = big ? '18px' : '10px';
                             box.style.overflow = 'hidden';
+                            try {
+                                box.classList.add(big ? 'phx-tb' : 'phx-tb-sm');
+                                box.classList.remove(big ? 'phx-tb-sm' : 'phx-tb');
+                            } catch (e) {}
                             box.style.marginLeft = big ? '10px' : '';
                             box.style.marginRight = big ? '10px' : '';
                             if (!box.hasAttribute('data-phoenix-round')) {
@@ -378,9 +397,36 @@ class BrowserFragment : Fragment() {
                             }
                         } catch (e) {}
                     }
+                    function padMeta(host) {
+                        // Keep the meta text out of the button's
+                        // corner: on long bylines the channel/views/
+                        // time text ran UNDER the icon (field
+                        // screenshot 2026-10-22 16:11). Give the
+                        // item's text block right padding once; the
+                        // text then truncates before the button zone.
+                        try {
+                            if (host.getAttribute('data-phoenix-pad') === '1') return;
+                            var h3 = host.querySelector('h3');
+                            if (!h3) return;
+                            var img = host.querySelector('img');
+                            var node = h3, padEl = null;
+                            for (var d = 0; d < 4; d++) {
+                                node = node.parentElement;
+                                if (!node || node === host) break;
+                                if (/views/i.test(node.textContent || '')) { padEl = node; break; }
+                                if (img && node.contains(img)) break;
+                            }
+                            var el = padEl || h3.parentElement;
+                            if (el && el !== host) {
+                                el.style.paddingRight = '54px';
+                                host.setAttribute('data-phoenix-pad', '1');
+                                stats.padded = (stats.padded || 0) + 1;
+                            }
+                        } catch (e) {}
+                    }
                     function addButtons() {
                         stats.passes++;
-                        debug.added = 0; debug.refreshed = 0; debug.rounded = 0; debug.views = 0;
+                        debug.added = 0; debug.refreshed = 0; debug.rounded = 0; debug.views = 0; debug.noCard = 0;
                         try {
                             var links = document.querySelectorAll('a[href*="watch"]');
                             debug.anchors = links.length;
@@ -415,6 +461,17 @@ class BrowserFragment : Fragment() {
                                         if (pd === 1 && par.querySelector('h3')) { host = par; } else { break; }
                                     }
                                 } catch (e) {}
+                                // Card-only rule (user verdict
+                                // 2026-10-22 15:57: buttons sat ON the
+                                // up-next thumbnails): a fallback host
+                                // that still has no title is not a card -
+                                // skip this pass instead of parking the
+                                // button on the thumbnail. The retries
+                                // catch the item once its card exists.
+                                if (viaFallback && !host.querySelector('h3')) {
+                                    debug.noCard = (debug.noCard || 0) + 1;
+                                    continue;
+                                }
                                 if (!host.querySelector('img')) { debug.noThumb++; continue; }
                                 if (host.closest('ytm-player,#player,.html5-video-player,ytm-inline-player')) {
                                     debug.inPlayer++; continue;
@@ -426,6 +483,7 @@ class BrowserFragment : Fragment() {
                                     // layout may have settled since the
                                     // button was added).
                                     styleItem(host);
+                                    padMeta(host);
                                     existing.setAttribute('data-vid', vid);
                                     debug.refreshed++; stats.refreshed++;
                                     if (!debug.vis) debug.vis = probeVis(existing);
@@ -457,6 +515,7 @@ class BrowserFragment : Fragment() {
                                 }, true);
                                 host.appendChild(btn);
                                 styleItem(host);
+                                padMeta(host);
                                 debug.added++; stats.added++;
                                 if (viaFallback) { debug.fbAdded++; stats.fbAdded = (stats.fbAdded || 0) + 1; }
                                 if (!debug.vis) debug.vis = probeVis(btn);
@@ -534,19 +593,15 @@ class BrowserFragment : Fragment() {
     }
 
     /**
-     * Hide YouTube's own chrome on EVERY page (user spec 2026-10-22):
-     * the header (logo icon, "YouTube" wordmark, Open App, search,
-     * three dots) AND the bottom button/pivot bar — shown nowhere.
-     *
-     * Second attempt: build 299's census showed the candidates DO
-     * exist (header element, ytm-mobile-topbar-renderer, ytm-header
-     * depending on the page), yet the bar stayed visible — a style
-     * element alone is not proof of hiding. Now every matched element
-     * ALSO gets display:none via the CSSOM (setProperty with
-     * !important — not subject to style-element CSP), re-applied on
-     * an interval + MutationObserver because YouTube's SPA swaps the
-     * elements. The census (now including the pivot bar) is reported
-     * once per page for the log.
+     * Page chrome control (user spec 2026-10-22, extended same day):
+     * hide YouTube's header AND bottom pivot bar AND the filter
+     * chips bar; hide Shorts shelves/items (the user does not want
+     * Shorts in the feeds); round item thumbnails at the CSS layer
+     * too (the per-item inline styling alone flickered round/square
+     * as YouTube rebuilt cards). Everything is census-reported per
+     * page so a miss is diagnosable from the log, never guessed.
+     * The player surface itself is never rounded or hidden - the
+     * playing video stays full-bleed and square, as specified.
      */
     private fun injectPageStyle(webView: WebView) {
         val js = """
@@ -554,21 +609,51 @@ class BrowserFragment : Fragment() {
                 try {
                     var HEAD = ['ytm-header', 'header', '#header', 'ytm-mobile-topbar-renderer', '#mobile-topbar'];
                     var PIVOT = ['ytm-pivot-bar-renderer', '#pivot-bar', 'ytm-pivot-bar-item-renderer'];
-                    var ALL = HEAD.concat(PIVOT);
+                    var CHIPS = ['ytm-feed-filter-chip-bar-renderer', 'ytm-chip-bar-renderer', '#chips-wrapper', 'ytm-search-filter-chip-bar-renderer'];
+                    var ALL = HEAD.concat(PIVOT).concat(CHIPS);
+                    var THUMB_SELS = ['ytm-media-item .media-item-thumbnail-container',
+                        'ytm-video-with-context-renderer .video-thumbnail-container',
+                        'ytm-compact-video-renderer .compact-video-thumbnail-container',
+                        'ytm-playlist-panel-video-renderer .media-item-thumbnail-container',
+                        'ytm-rich-item-renderer .video-thumbnail-container'];
                     function firstMatch(list) {
                         for (var i = 0; i < list.length; i++) {
                             if (document.querySelector(list[i])) return list[i];
                         }
                         return null;
                     }
+                    function hideEl(el) {
+                        try { el.style.setProperty('display', 'none', 'important'); } catch (e) {}
+                    }
+                    function hideShorts() {
+                        var n = 0;
+                        try {
+                            var links = document.querySelectorAll('a[href*="/shorts/"]');
+                            for (var i = 0; i < links.length; i++) {
+                                var shelf = links[i].closest('ytm-rich-shelf-renderer, ytm-item-section-renderer, ytm-shelf-renderer, ytm-reel-shelf-renderer');
+                                var target = shelf || links[i].closest('ytm-media-item, ytm-video-with-context-renderer, ytm-compact-video-renderer, ytm-rich-item-renderer');
+                                if (target && target.style.display !== 'none') { hideEl(target); n++; }
+                            }
+                        } catch (e) {}
+                        return n;
+                    }
                     function applyHide() {
                         var hidden = 0;
                         for (var i = 0; i < ALL.length; i++) {
                             var els = document.querySelectorAll(ALL[i]);
-                            for (var j = 0; j < els.length; j++) {
+                            for (var j = 0; j < els.length; j++) { hideEl(els[j]); hidden++; }
+                        }
+                        var sh = hideShorts();
+                        if (sh > 0) {
+                            window._phxShortsHidden = (window._phxShortsHidden || 0) + sh;
+                            if (window._phxShortsHidden !== (window._phxShortsReported || 0)) {
+                                window._phxShortsReported = window._phxShortsHidden;
                                 try {
-                                    els[j].style.setProperty('display', 'none', 'important');
-                                    hidden++;
+                                    if (window.PhoenixDownloader && PhoenixDownloader.reportDiag) {
+                                        PhoenixDownloader.reportDiag(JSON.stringify({
+                                            shortsHidden: window._phxShortsHidden, href: location.href
+                                        }));
+                                    }
                                 } catch (e) {}
                             }
                         }
@@ -578,7 +663,10 @@ class BrowserFragment : Fragment() {
                     if (!st) {
                         st = document.createElement('style');
                         st.id = 'phoenix-page-style';
-                        st.textContent = ALL.join(',') + ' { display: none !important; }';
+                        st.textContent = ALL.join(',') + ' { display: none !important; }' +
+                            THUMB_SELS.join(',') + ' { border-radius: 14px !important; overflow: hidden !important; }' +
+                            '.phx-tb { border-radius: 18px !important; overflow: hidden !important; }' +
+                            '.phx-tb-sm { border-radius: 10px !important; overflow: hidden !important; }';
                         (document.head || document.documentElement).appendChild(st);
                     }
                     var hiddenNow = applyHide();
@@ -600,17 +688,22 @@ class BrowserFragment : Fragment() {
                         window._phoenixChromeSent[key] = 1;
                         var census = {};
                         for (var c = 0; c < ALL.length; c++) census[ALL[c]] = !!document.querySelector(ALL[c]);
+                        var thumbCensus = {};
+                        for (var t = 0; t < THUMB_SELS.length; t++) {
+                            thumbCensus[THUMB_SELS[t]] = document.querySelectorAll(THUMB_SELS[t]).length;
+                        }
                         try {
                             if (window.PhoenixDownloader && PhoenixDownloader.reportDiag) {
                                 PhoenixDownloader.reportDiag(JSON.stringify({
-                                    chrome: {header: firstMatch(HEAD) || 'none', pivot: firstMatch(PIVOT) || 'none', hidden: hiddenNow},
+                                    chrome: {header: firstMatch(HEAD) || 'none', pivot: firstMatch(PIVOT) || 'none', chips: firstMatch(CHIPS) || 'none', hidden: hiddenNow},
                                     census: census,
+                                    thumbSel: thumbCensus,
                                     href: location.href
                                 }));
                             }
                         } catch (e) {}
                     }
-                    return JSON.stringify({header: firstMatch(HEAD) || 'none', pivot: firstMatch(PIVOT) || 'none', hidden: hiddenNow});
+                    return JSON.stringify({header: firstMatch(HEAD) || 'none', pivot: firstMatch(PIVOT) || 'none', chips: firstMatch(CHIPS) || 'none', hidden: hiddenNow});
                 } catch (e) {
                     return JSON.stringify({err: 'outer: ' + (e && e.message || e)});
                 }

@@ -1,5 +1,6 @@
 package com.phoenix.downloader.ui.home
 
+import android.animation.ValueAnimator
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -27,6 +28,18 @@ class HomeBrowserFragment : Fragment() {
 
     private var _binding: FragmentHomeBrowserBinding? = null
     private val binding get() = _binding!!
+
+    // Top-bar auto-hide (user spec 2026-10-22): on feed/results the
+    // bar hides while scrolling down and returns on scroll up; on a
+    // watch page it hides the moment the video opens and stays
+    // hidden, so the video sits at the very top, full-bleed.
+    private var barAnimator: ValueAnimator? = null
+    private var barFullHeight = -1
+    private var barHidden = false
+    private var onWatchPage = false
+    private var lastScrollY = 0
+    private var downAcc = 0
+    private var upAcc = 0
 
     override fun onCreateView(
         inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?
@@ -78,6 +91,97 @@ class HomeBrowserFragment : Fragment() {
                 )
                 .commitNow()
         }
+
+        // Hook the embedded browser for the top-bar behavior, and
+        // evaluate the page we are already on (restored state).
+        val browser = childFragmentManager.findFragmentByTag(BROWSER_TAG) as? BrowserFragment
+        browser?.onHostUrlChanged = { url -> onBrowserUrl(url) }
+        browser?.onHostScroll = { y -> onBrowserScroll(y) }
+        val initialUrl = browser?.currentUrl()
+            ?: arguments?.getString(ARG_START_URL)?.takeIf { it.isNotEmpty() }
+            ?: YOUTUBE_HOME
+        onBrowserUrl(initialUrl)
+    }
+
+    private fun onBrowserUrl(url: String) {
+        val watch = url.contains("/watch") || url.contains("youtu.be/") ||
+            url.contains("/shorts/")
+        onWatchPage = watch
+        downAcc = 0
+        upAcc = 0
+        lastScrollY = 0
+        if (watch) hideBar() else showBar()
+    }
+
+    private fun onBrowserScroll(y: Int) {
+        if (onWatchPage) return // the bar stays hidden while watching
+        val dy = y - lastScrollY
+        lastScrollY = y
+        when {
+            y <= 0 -> {
+                downAcc = 0
+                upAcc = 0
+                showBar()
+            }
+            dy > 0 -> {
+                downAcc += dy
+                upAcc = 0
+                if (downAcc > 90) hideBar()
+            }
+            dy < 0 -> {
+                upAcc += -dy
+                downAcc = 0
+                if (upAcc > 45) showBar()
+            }
+        }
+    }
+
+    private fun hideBar() {
+        if (_binding == null || barHidden) return
+        barHidden = true
+        val wrap = binding.topBarWrap
+        if (wrap.height > 0) barFullHeight = wrap.height
+        animateBarHeight(wrap.height, 0) { wrap.visibility = View.GONE }
+    }
+
+    private fun showBar() {
+        if (_binding == null || !barHidden) return
+        barHidden = false
+        val wrap = binding.topBarWrap
+        wrap.visibility = View.VISIBLE
+        val target = if (barFullHeight > 0) barFullHeight else {
+            wrap.layoutParams.height = ViewGroup.LayoutParams.WRAP_CONTENT
+            return
+        }
+        animateBarHeight(0, target) {
+            wrap.layoutParams.height = ViewGroup.LayoutParams.WRAP_CONTENT
+            wrap.requestLayout()
+        }
+    }
+
+    private fun animateBarHeight(from: Int, to: Int, onEnd: () -> Unit) {
+        if (_binding == null) return
+        val wrap = binding.topBarWrap
+        barAnimator?.cancel()
+        if (from == to) {
+            onEnd()
+            return
+        }
+        barAnimator = ValueAnimator.ofInt(from, to).apply {
+            duration = 160
+            addUpdateListener { anim ->
+                if (_binding == null) return@addUpdateListener
+                val lp = wrap.layoutParams
+                lp.height = anim.animatedValue as Int
+                wrap.layoutParams = lp
+            }
+            addListener(object : android.animation.AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: android.animation.Animator) {
+                    onEnd()
+                }
+            })
+            start()
+        }
     }
 
     /** Load a url in the embedded browser (search submits land here). */
@@ -87,6 +191,11 @@ class HomeBrowserFragment : Fragment() {
     }
 
     override fun onDestroyView() {
+        barAnimator?.cancel()
+        barAnimator = null
+        val browser = childFragmentManager.findFragmentByTag(BROWSER_TAG) as? BrowserFragment
+        browser?.onHostUrlChanged = null
+        browser?.onHostScroll = null
         super.onDestroyView()
         _binding = null
     }
