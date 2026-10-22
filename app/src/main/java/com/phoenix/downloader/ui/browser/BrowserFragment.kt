@@ -462,6 +462,9 @@ class BrowserFragment : Fragment() {
                             }
                         } catch (e) {}
                     }
+                    function countWatchAnchors() {
+                        try { return document.querySelectorAll('a[href*="watch"]').length; } catch (e) { return -1; }
+                    }
                     function addButtons(fullPass) {
                         stats.passes++;
                         debug.added = 0; debug.refreshed = 0; debug.rounded = 0; debug.views = 0; debug.noCard = 0;
@@ -601,6 +604,7 @@ class BrowserFragment : Fragment() {
                                 }
                             } catch (e6) {}
                         } catch (e) { debug.err = String(e && e.message || e); }
+                        window._phxLastAnchorCount = countWatchAnchors();
                         return debug;
                     }
                     var d = addButtons(true);
@@ -620,12 +624,24 @@ class BrowserFragment : Fragment() {
                     if (!window._phoenixObserver && document.body) {
                         try {
                             window._phoenixObserver = new MutationObserver(function() {
-                                // Debounced: YouTube mutates its DOM
-                                // constantly, and a full scan per
-                                // mutation starved the page itself.
+                                // Debounced AND causally gated
+                                // (2026-10-22): a pass runs only when
+                                // the watch-anchor COUNT changed -
+                                // i.e. new items actually arrived.
+                                // Scrolling makes YouTube clone/re-
+                                // render rows constantly; passes that
+                                // re-ran for those mutations kept
+                                // re-stamping the existing buttons on
+                                // every scroll-settle (the user saw
+                                // the buttons 'arrive' with each
+                                // scroll, and the churn loaded the
+                                // page). With the count unchanged
+                                // there is nothing new to add.
                                 if (window._phxBtnPend) return;
                                 window._phxBtnPend = setTimeout(function() {
                                     window._phxBtnPend = null;
+                                    var c = countWatchAnchors();
+                                    if (c >= 0 && c === (window._phxLastAnchorCount || 0)) return;
                                     addButtons(false);
                                 }, 650);
                             });
@@ -1141,6 +1157,12 @@ class BrowserFragment : Fragment() {
                                 if (window._phxPillPend) return;
                                 window._phxPillPend = setTimeout(function() {
                                     window._phxPillPend = null;
+                                    // Causal gate: the row exists
+                                    // for this video = nothing to do,
+                                    // whatever the page mutated.
+                                    var cv = currentVid();
+                                    var rw = document.getElementById('phoenix-dl-row');
+                                    if (cv && rw && rw.getAttribute('data-vid') === cv) return;
                                     ensure();
                                 }, 650);
                             });
