@@ -409,11 +409,20 @@ class BrowserFragment : Fragment() {
                                 // little more on every pass (field
                                 // screenshots 2026-10-22 22:30: digit
                                 // repeats + the real count).
-                                var metaEl = null;
+                                var m = null;
                                 var h3v = host.querySelector('h3');
-                                if (h3v) metaEl = h3v.parentElement;
-                                var m = metaEl ? (metaEl.textContent || '').match(/([\d.,]+\s*[KMB]?\s*views?)/i) : null;
-                                if (m && m[1].length > 24) m = null;
+                                var climbN = h3v;
+                                for (var cd = 0; cd < 3 && climbN && climbN.parentElement && !m; cd++) {
+                                    var par = climbN.parentElement;
+                                    var sib = '';
+                                    for (var sc = 0; sc < par.childNodes.length; sc++) {
+                                        var cn = par.childNodes[sc];
+                                        if (cn !== climbN) sib += (cn.textContent || '');
+                                    }
+                                    var mm = sib.match(/([\d.,]+\s*[KMB]?\s*views?)/i);
+                                    if (mm && mm[1].length <= 24) m = mm;
+                                    climbN = par;
+                                }
                                 if (m) {
                                     var txt = m[1].replace(/\s+/g, ' ').trim();
                                     if (!badge) {
@@ -605,6 +614,8 @@ class BrowserFragment : Fragment() {
                             } catch (e6) {}
                         } catch (e) { debug.err = String(e && e.message || e); }
                         window._phxLastAnchorCount = countWatchAnchors();
+                        var fa2 = document.querySelector('a[href*="watch"]');
+                        window._phxFirstVid = fa2 ? (fa2.getAttribute('href') || '') : '';
                         return debug;
                     }
                     var d = addButtons(true);
@@ -641,7 +652,11 @@ class BrowserFragment : Fragment() {
                                 window._phxBtnPend = setTimeout(function() {
                                     window._phxBtnPend = null;
                                     var c = countWatchAnchors();
-                                    if (c >= 0 && c === (window._phxLastAnchorCount || 0)) return;
+                                    var firstA = document.querySelector('a[href*="watch"]');
+                                    var firstVid = firstA ? (firstA.getAttribute('href') || '') : '';
+                                    if (c >= 0 && c === (window._phxLastAnchorCount || 0) &&
+                                        firstVid === (window._phxFirstVid || '')) return;
+                                    window._phxFirstVid = firstVid;
                                     addButtons(false);
                                 }, 650);
                             });
@@ -748,10 +763,19 @@ class BrowserFragment : Fragment() {
                     function applyHide() {
                         var hidden = 0;
                         try {
+                            var pRoot = document.querySelector('#player-container-id, .html5-video-player, ytm-player');
+                            var pRect = null;
+                            try { pRect = pRoot ? pRoot.getBoundingClientRect() : null; } catch (e) {}
                             var pb = document.querySelectorAll('#player-container-id button, .html5-video-player button, ytm-player button');
                             for (var u = 0; u < pb.length; u++) {
                                 var lbl = (pb[u].getAttribute('aria-label') || '');
-                                if (/unmute/i.test(lbl)) hideEl(pb[u]);
+                                if (!/unmute/i.test(lbl)) continue;
+                                if (pRect && pRect.height > 0) {
+                                    var bR = null;
+                                    try { bR = pb[u].getBoundingClientRect(); } catch (e) {}
+                                    if (bR && bR.top > pRect.top + pRect.height * 0.45) continue;
+                                }
+                                hideEl(pb[u]);
                             }
                         } catch (e) {}
                         for (var i = 0; i < ALL.length; i++) {
