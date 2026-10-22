@@ -444,7 +444,7 @@ class BrowserFragment : Fragment() {
                             }
                         } catch (e) {}
                     }
-                    function addButtons() {
+                    function addButtons(fullPass) {
                         stats.passes++;
                         debug.added = 0; debug.refreshed = 0; debug.rounded = 0; debug.views = 0; debug.noCard = 0;
                         try {
@@ -499,12 +499,18 @@ class BrowserFragment : Fragment() {
                                 var existing = host.querySelector('[data-phoenix-btn]');
                                 if (existing) {
                                     // Recycled row: refresh the target
-                                    // video AND the item geometry (the
-                                    // layout may have settled since the
-                                    // button was added).
-                                    styleItem(host);
-                                    padMeta(host);
-                                    existing.setAttribute('data-vid', vid);
+                                    // video id cheaply on every pass;
+                                    // the expensive geometry re-check
+                                    // (styleItem/padMeta - forced layouts)
+                                    // runs only on the 1s burst passes.
+                                    // Running it on EVERY mutation pass
+                                    // saturated the page's main thread
+                                    // and starved YouTube's own rendering
+                                    // (field 2026-10-22: blank pages).
+                                    if (fullPass) { styleItem(host); padMeta(host); }
+                                    if (existing.getAttribute('data-vid') !== vid) {
+                                        existing.setAttribute('data-vid', vid);
+                                    }
                                     debug.refreshed++; stats.refreshed++;
                                     if (!debug.vis) debug.vis = probeVis(existing);
                                     continue;
@@ -579,17 +585,32 @@ class BrowserFragment : Fragment() {
                         } catch (e) { debug.err = String(e && e.message || e); }
                         return debug;
                     }
-                    var d = addButtons();
+                    var d = addButtons(true);
+                    // One burst per page at a time: every SPA
+                    // navigation re-injects, and stacked 1s bursts
+                    // from earlier navigations kept the main thread
+                    // busy long after their page was gone.
+                    if (window._phxBtnTimer) clearInterval(window._phxBtnTimer);
                     var tries = 0;
                     var timer = setInterval(function() {
                         tries++;
-                        addButtons();
-                        if (tries >= 10) { clearInterval(timer); reportOnce(); }
+                        addButtons(true);
+                        if (tries >= 10) { clearInterval(timer); window._phxBtnTimer = null; reportOnce(); }
                     }, 1000);
+                    window._phxBtnTimer = timer;
                     setTimeout(reportOnce, 25000);
                     if (!window._phoenixObserver && document.body) {
                         try {
-                            window._phoenixObserver = new MutationObserver(function() { addButtons(); });
+                            window._phoenixObserver = new MutationObserver(function() {
+                                // Debounced: YouTube mutates its DOM
+                                // constantly, and a full scan per
+                                // mutation starved the page itself.
+                                if (window._phxBtnPend) return;
+                                window._phxBtnPend = setTimeout(function() {
+                                    window._phxBtnPend = null;
+                                    addButtons(false);
+                                }, 650);
+                            });
                             window._phoenixObserver.observe(document.body, { childList: true, subtree: true });
                         } catch (e3) { debug.err = 'observer: ' + e3; }
                     }
@@ -708,15 +729,23 @@ class BrowserFragment : Fragment() {
                         (document.head || document.documentElement).appendChild(st);
                     }
                     var hiddenNow = applyHide();
+                    if (window._phxChromeTimer) clearInterval(window._phxChromeTimer);
                     var tries = 0;
                     var timer = setInterval(function() {
                         tries++;
                         applyHide();
-                        if (tries >= 12) clearInterval(timer);
+                        if (tries >= 12) { clearInterval(timer); window._phxChromeTimer = null; }
                     }, 1000);
+                    window._phxChromeTimer = timer;
                     if (!window._phoenixChromeObserver && document.body) {
                         try {
-                            window._phoenixChromeObserver = new MutationObserver(function() { applyHide(); });
+                            window._phoenixChromeObserver = new MutationObserver(function() {
+                                if (window._phxChromePend) return;
+                                window._phxChromePend = setTimeout(function() {
+                                    window._phxChromePend = null;
+                                    applyHide();
+                                }, 800);
+                            });
                             window._phoenixChromeObserver.observe(document.body, { childList: true, subtree: true });
                         } catch (e) {}
                     }
@@ -926,31 +955,37 @@ class BrowserFragment : Fragment() {
                             var vid = currentVid();
                             if (!vid) return 'no-vid';
                             if (location.href.indexOf('/watch') < 0) return 'not-watch';
-                            // Unmute (user 2026-10-22): a watch page
-                            // opened from our native results loads
-                            // with no in-page tap first, so YouTube
-                            // starts the video muted (the white
-                            // speaker-x chip). Undo that during the
-                            // first seconds only, and stop as soon as
-                            // the video is seen playing with sound -
-                            // a mute the user sets later is respected.
+                            // Unmute (user law 2026-10-22: NEVER
+                            // muted on watch pages - sound from the
+                            // first moment). A page opened from our
+                            // native results has no in-page tap, so
+                            // YouTube starts muted. A timed window
+                            // raced the player; instead install
+                            // persistent listeners ONCE: any mute the
+                            // player applies is undone on the spot,
+                            // for the whole life of the page.
                             try {
-                                if (!window._phxUnmute) window._phxUnmute = {};
-                                var uu = window._phxUnmute[vid];
-                                var nowU = Date.now();
-                                if (!uu) { uu = window._phxUnmute[vid] = {t: nowU, done: false}; }
-                                if (!uu.done && nowU - uu.t < 15000) {
-                                    var vel = document.querySelector('video');
-                                    if (vel) {
-                                        if (vel.muted) {
-                                            vel.muted = false;
-                                            try { vel.volume = 1; } catch (e) {}
+                                if (!window._phxUnmuteHook) {
+                                    window._phxUnmuteHook = 1;
+                                    var unmuteFn = function(ev) {
+                                        var v = ev && ev.target;
+                                        if (v && v.tagName === 'VIDEO' && v.muted) {
+                                            v.muted = false;
+                                            try { v.volume = 1; } catch (e) {}
                                             stats.unmuteTries = (stats.unmuteTries || 0) + 1;
-                                        } else if (!vel.paused && vel.readyState > 0) {
-                                            uu.done = true;
-                                            stats.unmuted = (stats.unmuted || 0) + 1;
                                         }
-                                    }
+                                    };
+                                    document.addEventListener('volumechange', unmuteFn, true);
+                                    document.addEventListener('playing', unmuteFn, true);
+                                }
+                                var vel0 = document.querySelector('video');
+                                if (vel0 && vel0.muted) {
+                                    vel0.muted = false;
+                                    try { vel0.volume = 1; } catch (e) {}
+                                    stats.unmuteTries = (stats.unmuteTries || 0) + 1;
+                                }
+                                if (vel0 && !vel0.muted && !vel0.paused && vel0.readyState > 0 && !stats.unmuted) {
+                                    stats.unmuted = 1;
                                 }
                             } catch (e) {}
                             var row = document.getElementById('phoenix-dl-row');
@@ -1038,6 +1073,7 @@ class BrowserFragment : Fragment() {
                         }
                     }
                     var r = ensure();
+                    if (window._phxPillTimer) clearInterval(window._phxPillTimer);
                     var tries = 0;
                     var timer = setInterval(function() {
                         tries++;
@@ -1046,11 +1082,18 @@ class BrowserFragment : Fragment() {
                             stats.censusSent = true;
                             report({pill: 'no-anchor-late', vid: currentVid(), census: census()});
                         }
-                        if (tries >= 30) clearInterval(timer);
+                        if (tries >= 30) { clearInterval(timer); window._phxPillTimer = null; }
                     }, 1000);
+                    window._phxPillTimer = timer;
                     if (!window._phoenixPillObserver && document.body) {
                         try {
-                            window._phoenixPillObserver = new MutationObserver(function() { ensure(); });
+                            window._phoenixPillObserver = new MutationObserver(function() {
+                                if (window._phxPillPend) return;
+                                window._phxPillPend = setTimeout(function() {
+                                    window._phxPillPend = null;
+                                    ensure();
+                                }, 650);
+                            });
                             window._phoenixPillObserver.observe(document.body, { childList: true, subtree: true });
                         } catch (e) {}
                     }
