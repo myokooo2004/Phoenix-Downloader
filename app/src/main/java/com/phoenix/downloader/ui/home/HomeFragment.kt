@@ -159,7 +159,7 @@ class HomeFragment : Fragment() {
     private fun ensureAdapter() {
         if (videoAdapter != null) return
         videoAdapter = VideoAdapter(videoList,
-            onWatchClick = { video -> (activity as MainActivity).openVideoDetail(video.url, video.title, video.thumbnail, video.duration) },
+            onWatchClick = { video -> (activity as MainActivity).openBrowser(video.url) },
             onDownloadClick = { video -> DownloadDialogFragment.newInstance(video.url, video.title, video.thumbnail, video.duration).show(childFragmentManager, "DownloadDialog") }
         )
         binding.rvVideos.adapter = videoAdapter

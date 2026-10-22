@@ -51,7 +51,7 @@ class SearchFragment : Fragment() {
         adapter = VideoAdapter(
             videos = items,
             onWatchClick = { video ->
-                (activity as? MainActivity)?.openVideoDetail(video.url, video.title, video.thumbnail, video.duration)
+                (activity as? MainActivity)?.openBrowser(video.url)
             },
             onDownloadClick = { video ->
                 DownloadDialogFragment.newInstance(video.url, video.title, video.thumbnail)

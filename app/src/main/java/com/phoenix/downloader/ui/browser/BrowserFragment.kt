@@ -7,7 +7,6 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.WebChromeClient
-import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.core.view.isVisible
@@ -26,8 +25,13 @@ import kotlinx.coroutines.launch
  * lock icon, page progress. Standard WebView TLS handling — no custom
  * SSL bypass, so no security errors are shown.
  *
- * When navigation lands on a video URL, the floating download button
- * appears; tapping it fetches the video info and opens the download dialog.
+ * Watching happens HERE (user direction 2026-10-22: browser watch):
+ * video taps stay in the page, so playback, Up next and comments are
+ * YouTube's own and start instantly — the native detail page cannot
+ * match that (stream URLs need a PO token only the web player mints).
+ * Our layer on top: per-video download buttons in lists, and the
+ * "Video detected" pill on a watch page, which opens the download
+ * dialog for the current video.
  * Account logins work because this is a real WebView with cookies enabled.
  */
 class BrowserFragment : Fragment() {
@@ -35,13 +39,6 @@ class BrowserFragment : Fragment() {
     private var _binding: FragmentBrowserBinding? = null
     private val binding get() = _binding!!
     private var pendingVideoUrl: String? = null
-
-    // Video-tap interception state (see shouldOverrideUrlLoading): the
-    // in-flight info fetch (self-clears when the view is destroyed, since
-    // it runs in the view lifecycle scope) and the last intercepted URL.
-    private var detailFetchJob: kotlinx.coroutines.Job? = null
-    private var lastInterceptUrl: String? = null
-    private var lastInterceptAt: Long = 0L
 
     override fun onCreateView(
         inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?
@@ -92,47 +89,32 @@ class BrowserFragment : Fragment() {
             }
         }, "PhoenixDownloader")
 
-        // "Video detected" hint: tap -> open the detail page (player +
-        // related), same as tapping a video on Home (user spec 2026-10-20).
+        // "Video detected — tap to download" pill: the page keeps
+        // playing (browser watch); the pill is the download path for
+        // the current video and opens the download dialog directly.
         binding.tvDetectHint.setOnClickListener {
             val url = pendingVideoUrl ?: return@setOnClickListener
-            openDetailFor(url) { e ->
-                android.widget.Toast.makeText(
-                    requireContext(),
-                    e.message ?: "Could not fetch video",
-                    android.widget.Toast.LENGTH_SHORT
-                ).show()
+            viewLifecycleOwner.lifecycleScope.launch {
+                YtDlpManager.fetchVideoInfo(url)
+                    .onSuccess { DownloadDialogFragment.newInstance(it.url, it.title).show(parentFragmentManager, "DownloadDialog") }
+                    .onFailure { e ->
+                        context?.let { ctx ->
+                            android.widget.Toast.makeText(
+                                ctx,
+                                e.message ?: "Could not fetch video",
+                                android.widget.Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                    }
             }
         }
 
         wv.webViewClient = object : WebViewClient() {
-            override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
-                // VidMate-style entry (user, 2026-10-21): a TAP on a video
-                // link opens our detail page (pinned player + red Download)
-                // instead of loading the site's watch page, which has no
-                // download button at all. Stability guards, so the page
-                // never "jumps out" on its own:
-                //  - main-frame + real user gesture only; redirects and
-                //    SPA pushState navigations are NOT intercepted
-                //    (doUpdateVisitedHistory is deliberately not hooked,
-                //    so in-page autoplay/next never yanks the user out)
-                //  - only URLs UrlDetector knows are video pages
-                //  - one info fetch in flight at a time; the same URL is
-                //    latched for 3s so a double-fire opens one page only
-                //  - fetch failure -> the WebView loads the page as before
-                val target = request.url?.toString() ?: return false
-                if (!request.isForMainFrame || !request.hasGesture()) return false
-                if (UrlDetector.detect(target) == null) return false
-                if (target == view.url) return false
-                if (detailFetchJob?.isActive == true) return true
-                val now = android.os.SystemClock.uptimeMillis()
-                if (target == lastInterceptUrl && now - lastInterceptAt < 3000) return true
-                lastInterceptUrl = target
-                lastInterceptAt = now
-                openDetailFor(target) { view.loadUrl(target) }
-                return true
-            }
-
+            // No shouldOverrideUrlLoading interception (removed
+            // 2026-10-22 with the browser-watch direction): video taps
+            // load YouTube's own watch page in place — instant playback,
+            // YouTube's own Up next — instead of bouncing out to our
+            // native detail page.
             override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
                 binding.tvUrl.text = url
                 checkForVideo(url)
@@ -214,25 +196,6 @@ class BrowserFragment : Fragment() {
             wv.loadUrl(startUrl)
         } else {
             wv.restoreState(savedInstanceState ?: Bundle())
-        }
-    }
-
-    /**
-     * Shared path for the "Video detected" pill and for video-link tap
-     * interception: fetch the video's info, then open the detail page
-     * (pinned player + red Download + related). [onFetchFail] decides
-     * what a failure means for each entry point.
-     */
-    private fun openDetailFor(url: String, onFetchFail: (Throwable) -> Unit) {
-        detailFetchJob = viewLifecycleOwner.lifecycleScope.launch {
-            YtDlpManager.fetchVideoInfo(url)
-                .onSuccess { info ->
-                    (activity as? MainActivity)?.openVideoDetail(
-                        info.url, info.title,
-                        info.thumbnailUrl ?: "", info.durationSec.toInt()
-                    )
-                }
-                .onFailure { e -> onFetchFail(e) }
         }
     }
 
