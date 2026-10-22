@@ -313,35 +313,50 @@ class BrowserFragment : Fragment() {
                     function styleItem(host) {
                         // Rounded thumbnail + YouTube's own view count
                         // ON the thumbnail (user mockups v5/v6
-                        // 2026-10-22). Big cards get the inset look and
-                        // the views badge; small rows just get rounded
-                        // corners. Counted in stats (log proof).
+                        // 2026-10-22). Geometry is re-evaluated on
+                        // EVERY call: the first pass can run while the
+                        // card is still a narrow skeleton, and locking
+                        // radius/margins then left the first cards
+                        // full-bleed with square corners while later
+                        // cards were inset (field screenshots
+                        // 2026-10-22 15:36). The player surface is
+                        // never styled: an autoplay next-preview that
+                        // overlaps it got a views stamp in the field.
                         try {
                             var img = host.querySelector('img');
                             if (!img) return;
                             var box = img.closest('a') || img.parentElement;
                             if (!box) return;
+                            if (box.querySelector('video')) return;
                             var big = false;
                             try { big = box.getBoundingClientRect().width > 250; } catch (e) {}
+                            try {
+                                var plr = document.querySelector('#player-container-id, ytm-player');
+                                if (plr) {
+                                    var br = box.getBoundingClientRect();
+                                    var pr = plr.getBoundingClientRect();
+                                    if (br.height > 0 && pr.height > 0 &&
+                                        br.top < pr.bottom && br.bottom > pr.top &&
+                                        br.left < pr.right && br.right > pr.left) return;
+                                }
+                            } catch (e) {}
+                            try {
+                                if (window.getComputedStyle(box).position === 'static') {
+                                    box.style.position = 'relative';
+                                }
+                            } catch (e) {}
+                            box.style.borderRadius = big ? '18px' : '10px';
+                            box.style.overflow = 'hidden';
+                            box.style.marginLeft = big ? '10px' : '';
+                            box.style.marginRight = big ? '10px' : '';
                             if (!box.hasAttribute('data-phoenix-round')) {
                                 box.setAttribute('data-phoenix-round', '1');
-                                try {
-                                    if (window.getComputedStyle(box).position === 'static') {
-                                        box.style.position = 'relative';
-                                    }
-                                } catch (e) {}
-                                box.style.borderRadius = big ? '18px' : '10px';
-                                box.style.overflow = 'hidden';
-                                if (big) {
-                                    box.style.marginLeft = '10px';
-                                    box.style.marginRight = '10px';
-                                }
                                 stats.rounded = (stats.rounded || 0) + 1;
                                 debug.rounded = (debug.rounded || 0) + 1;
                             }
+                            var badge = box.querySelector('[data-phoenix-views]');
                             if (big) {
                                 var m = (host.textContent || '').match(/([\d.,]+\s*[KMB]?\s*views?)/i);
-                                var badge = box.querySelector('[data-phoenix-views]');
                                 if (m) {
                                     var txt = m[1].replace(/\s+/g, ' ').trim();
                                     if (!badge) {
@@ -358,6 +373,8 @@ class BrowserFragment : Fragment() {
                                 } else if (badge) {
                                     badge.remove();
                                 }
+                            } else if (badge) {
+                                badge.remove();
                             }
                         } catch (e) {}
                     }
@@ -379,14 +396,36 @@ class BrowserFragment : Fragment() {
                                     viaFallback = !!host;
                                 }
                                 if (!host) { debug.noHost++; continue; }
+                                // Card-level host: a thumb-only host
+                                // parks the button ON the thumbnail
+                                // (field screenshots 2026-10-22 15:36).
+                                // Climb while the parent still holds
+                                // exactly this one video and adds the
+                                // title the host lacks.
+                                try {
+                                    var cg = 0;
+                                    while (cg++ < 3 && !host.querySelector('h3') && host.parentElement) {
+                                        var par = host.parentElement;
+                                        var pas = par.querySelectorAll('a[href*="watch"]');
+                                        var pseen = {}, pd = 0;
+                                        for (var pi = 0; pi < pas.length; pi++) {
+                                            var pm = (pas[pi].getAttribute('href') || '').match(/[?&]v=([\w-]{11})/);
+                                            if (pm && !pseen[pm[1]]) { pseen[pm[1]] = 1; pd++; }
+                                        }
+                                        if (pd === 1 && par.querySelector('h3')) { host = par; } else { break; }
+                                    }
+                                } catch (e) {}
                                 if (!host.querySelector('img')) { debug.noThumb++; continue; }
                                 if (host.closest('ytm-player,#player,.html5-video-player,ytm-inline-player')) {
                                     debug.inPlayer++; continue;
                                 }
                                 var existing = host.querySelector('[data-phoenix-btn]');
                                 if (existing) {
-                                    // Recycled row: refresh the target video
-                                    if (existing.getAttribute('data-vid') !== vid) styleItem(host);
+                                    // Recycled row: refresh the target
+                                    // video AND the item geometry (the
+                                    // layout may have settled since the
+                                    // button was added).
+                                    styleItem(host);
                                     existing.setAttribute('data-vid', vid);
                                     debug.refreshed++; stats.refreshed++;
                                     if (!debug.vis) debug.vis = probeVis(existing);
@@ -689,8 +728,12 @@ class BrowserFragment : Fragment() {
                         for (var d = 0; d < maxDepth && node && node.parentElement; d++) {
                             node = node.parentElement;
                             if (!node || node === document.body) break;
+                            // A block containing the player is the whole
+                            // watch column, not metadata - the pill landed
+                            // above the player in the field (2026-10-22).
                             var r = node.getBoundingClientRect();
-                            if (r.width > window.innerWidth * 0.85 && node.querySelectorAll('button, [role="button"]').length >= 2) {
+                            if (r.width > window.innerWidth * 0.85 && node.querySelectorAll('button, [role="button"]').length >= 2 &&
+                                !node.querySelector('ytm-player, #player-container-id, video')) {
                                 return node;
                             }
                         }
@@ -729,7 +772,25 @@ class BrowserFragment : Fragment() {
                             if (!vid) return 'no-vid';
                             if (location.href.indexOf('/watch') < 0) return 'not-watch';
                             var row = document.getElementById('phoenix-dl-row');
-                            if (row && row.getAttribute('data-vid') === vid) return 'exists';
+                            if (row && row.getAttribute('data-vid') === vid) {
+                                // Fit guard: the pill belongs UNDER the
+                                // metadata - if it sits above the
+                                // player's bottom edge it is misplaced;
+                                // drop it and let the ladder re-anchor.
+                                var plEl = document.querySelector('#player-container-id, ytm-player');
+                                var misplaced = false;
+                                if (plEl) {
+                                    try {
+                                        var rr = row.getBoundingClientRect();
+                                        var prr = plEl.getBoundingClientRect();
+                                        if (rr.height > 0 && prr.height > 0 && rr.top < prr.bottom - 4) misplaced = true;
+                                    } catch (e) {}
+                                }
+                                if (!misplaced) return 'exists';
+                                row.remove(); stats.rebuilt++;
+                                report({pill: 'misplaced', vid: vid, stats: stats});
+                                row = null;
+                            }
                             if (row) { row.remove(); stats.rebuilt++; }
                             var after = null, before = null, how = '';
                             var info = document.querySelector('ytm-slim-video-information-renderer');
@@ -755,6 +816,7 @@ class BrowserFragment : Fragment() {
                             if (!after && !before) {
                                 var btns = document.querySelectorAll('button, [role="button"], ytm-button-renderer');
                                 for (var b = 0; b < btns.length; b++) {
+                                    if (btns[b].closest('ytm-player, #player, .html5-video-player')) continue;
                                     if ((btns[b].textContent || '').trim() === 'Subscribe') {
                                         after = climbBlock(btns[b], 6);
                                         how = 'subscribe-block';
