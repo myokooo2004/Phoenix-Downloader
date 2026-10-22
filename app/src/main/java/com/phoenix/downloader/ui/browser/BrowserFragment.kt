@@ -94,7 +94,7 @@ class BrowserFragment : Fragment() {
         wv.settings.userAgentString = wv.settings.userAgentString.replace("; wv", "")
         // Default TLS handling (no onReceivedSslError override) -> no security errors.
 
-        // JavaScript bridge for per-video download buttons (Vidmate-style)
+        // JavaScript bridge for per-video download buttons (user-style)
         wv.addJavascriptInterface(object {
             @android.webkit.JavascriptInterface
             fun onDownloadClick(videoUrl: String, title: String) {
@@ -154,7 +154,7 @@ class BrowserFragment : Fragment() {
                         requireContext(), currentUrl
                     )
                 } catch (e: Exception) { /* ignore */ }
-                // Inject Vidmate-style per-video download buttons
+                // Inject user-style per-video download buttons
                 injectDownloadButtons(view)
                 // Inject our action bar on YouTube watch pages
                 injectWatchActions(view)
@@ -543,7 +543,7 @@ class BrowserFragment : Fragment() {
                             // Mix / playlist panel header: one red ⬇ at
                             // the header's right (left of YouTube's own
                             // share icon) for the CURRENT video — the
-                            // user's VidMate Mix screenshot shows it
+                            // user's Mix reference screenshot shows it
                             // there (2026-10-22).
                             try {
                                 var panel = document.querySelector('ytm-playlist-panel-renderer');
@@ -719,6 +719,30 @@ class BrowserFragment : Fragment() {
                             window._phoenixChromeObserver = new MutationObserver(function() { applyHide(); });
                             window._phoenixChromeObserver.observe(document.body, { childList: true, subtree: true });
                         } catch (e) {}
+                    }
+                    // Late census (added 2026-10-22): the first
+                    // census fires on an empty DOM, so it could
+                    // never prove the chips bar, the Shorts shelves
+                    // or whether items rendered at all. Re-report
+                    // once after 5s with the loaded page's numbers.
+                    if (!window._phxLateCensus) {
+                        window._phxLateCensus = 1;
+                        setTimeout(function() {
+                            try {
+                                var lc = {};
+                                for (var i2 = 0; i2 < ALL.length; i2++) lc[ALL[i2]] = !!document.querySelector(ALL[i2]);
+                                if (window.PhoenixDownloader && PhoenixDownloader.reportDiag) {
+                                    PhoenixDownloader.reportDiag(JSON.stringify({
+                                        lateCensus: true,
+                                        census: lc,
+                                        anchorsNow: document.querySelectorAll('a[href*="watch"]').length,
+                                        shortsLinks: document.querySelectorAll('a[href*="/shorts/"]').length,
+                                        shortsHidden: window._phxShortsHidden || 0,
+                                        href: location.href
+                                    }));
+                                }
+                            } catch (e) {}
+                        }, 5000);
                     }
                     if (!window._phoenixChromeSent) window._phoenixChromeSent = {};
                     var key = 'chrome:' + location.href.split('&')[0];
