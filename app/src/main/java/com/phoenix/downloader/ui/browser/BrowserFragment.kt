@@ -143,6 +143,11 @@ class BrowserFragment : Fragment() {
             }
 
             override fun onPageFinished(view: WebView, url: String) {
+                // The document finished: complete the bar. An SPA
+                // keeps fetching in the background afterwards, and
+                // leaving the bar at <100 forever reads as 'stuck'
+                // (user 2026-10-22 22:34).
+                binding.pbPage.isVisible = false
                 // SPA sites (YouTube/Facebook) update URL via JS; re-check on finish
                 val currentUrl = view.url ?: url
                 binding.tvUrl.text = currentUrl
@@ -395,7 +400,20 @@ class BrowserFragment : Fragment() {
                             }
                             var badge = box.querySelector('[data-phoenix-views]');
                             if (big) {
-                                var m = (host.textContent || '').match(/([\d.,]+\s*[KMB]?\s*views?)/i);
+                                // Views text comes from the META block
+                                // (title/channel/views/time) ONLY. The
+                                // old code matched against the whole
+                                // host text - which contains our own
+                                // badge and the thumbnail duration -
+                                // and the stamp corrupted itself a
+                                // little more on every pass (field
+                                // screenshots 2026-10-22 22:30: digit
+                                // repeats + the real count).
+                                var metaEl = null;
+                                var h3v = host.querySelector('h3');
+                                if (h3v) metaEl = h3v.parentElement;
+                                var m = metaEl ? (metaEl.textContent || '').match(/([\d.,]+\s*[KMB]?\s*views?)/i) : null;
+                                if (m && m[1].length > 24) m = null;
                                 if (m) {
                                     var txt = m[1].replace(/\s+/g, ' ').trim();
                                     if (!badge) {
@@ -682,6 +700,21 @@ class BrowserFragment : Fragment() {
                     function hideShorts() {
                         var n = 0;
                         try {
+                            // Title-based shelf hide: a shelf whose
+                            // own heading reads 'Shorts' goes away as
+                            // a whole (covers shelf tags the link
+                            // walk below does not know - field
+                            // screenshot 2026-10-22 22:29 showed a
+                            // rendered Shorts shelf).
+                            var shelves = document.querySelectorAll('ytm-rich-shelf-renderer, ytm-shelf-renderer, ytm-item-section-renderer');
+                            for (var si = 0; si < shelves.length; si++) {
+                                var sh2 = shelves[si];
+                                if (sh2.style.display === 'none') continue;
+                                var hd = sh2.querySelector('h2');
+                                if (hd && (hd.textContent || '').trim() === 'Shorts' && isShortsOnly(sh2)) {
+                                    hideEl(sh2); n++;
+                                }
+                            }
                             var links = document.querySelectorAll('a[href*="/shorts/"]');
                             for (var i = 0; i < links.length; i++) {
                                 var a = links[i];
@@ -994,7 +1027,8 @@ class BrowserFragment : Fragment() {
                                 // metadata - if it sits above the
                                 // player's bottom edge it is misplaced;
                                 // drop it and let the ladder re-anchor.
-                                var plEl = document.querySelector('#player-container-id, ytm-player');
+                                var plEl = document.querySelector('video') ||
+                                    document.querySelector('#player-container-id, ytm-player');
                                 var misplaced = false;
                                 if (plEl) {
                                     try {
@@ -1003,7 +1037,15 @@ class BrowserFragment : Fragment() {
                                         if (rr.height > 0 && prr.height > 0 && rr.top < prr.bottom - 4) misplaced = true;
                                     } catch (e) {}
                                 }
-                                if (!misplaced) return 'exists';
+                                // Rebuild budget (field log 2026-10-22
+                                // 22:33: added/rebuilt climbed 1:1 into
+                                // the twenties - an endless remove/re-add
+                                // loop churning the page). Judge at most
+                                // twice per video, then accept.
+                                if (!window._phxPillRebuilds) window._phxPillRebuilds = {};
+                                var rb = window._phxPillRebuilds[vid] || 0;
+                                if (!misplaced || rb >= 2) return 'exists';
+                                window._phxPillRebuilds[vid] = rb + 1;
                                 row.remove(); stats.rebuilt++;
                                 report({pill: 'misplaced', vid: vid, stats: stats});
                                 row = null;
