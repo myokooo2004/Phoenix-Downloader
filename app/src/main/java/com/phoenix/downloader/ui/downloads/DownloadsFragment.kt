@@ -42,16 +42,6 @@ class DownloadsFragment : Fragment() {
     private val mode: Int
         get() = arguments?.getInt(ARG_MODE, MODE_ACTIVE) ?: MODE_ACTIVE
 
-    companion object {
-        const val MODE_ACTIVE = 0
-        const val MODE_DONE = 1
-        private const val ARG_MODE = "mode"
-
-        fun newInstance(mode: Int) = DownloadsFragment().apply {
-            arguments = Bundle().apply { putInt(ARG_MODE, mode) }
-        }
-    }
-
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
         _binding = FragmentDownloadsBinding.inflate(inflater, container, false)
         return binding.root
@@ -303,6 +293,14 @@ class DownloadsFragment : Fragment() {
     }
 
     companion object {
+        const val MODE_ACTIVE = 0
+        const val MODE_DONE = 1
+        private const val ARG_MODE = "mode"
+
+        fun newInstance(mode: Int) = DownloadsFragment().apply {
+            arguments = Bundle().apply { putInt(ARG_MODE, mode) }
+        }
+
         fun fmtBytes(bytes: Long): String = when {
             bytes >= 1024 * 1024 * 1024 -> "%.2f GB".format(bytes / (1024.0 * 1024 * 1024))
             bytes >= 1024 * 1024 -> "%.2f MB".format(bytes / (1024.0 * 1024))
