@@ -413,6 +413,20 @@ class BrowserFragment : Fragment() {
                                 if (host.closest('ytm-player,#player,.html5-video-player,ytm-inline-player')) {
                                     debug.inPlayer++; continue;
                                 }
+                                // Never land on the playing video
+                                // itself (user 2026-10-23): a host whose
+                                // box intersects the <video> rect is
+                                // skipped, wherever it sits in the DOM.
+                                var vEl = document.querySelector('video');
+                                if (vEl) {
+                                    try {
+                                        var vr = vEl.getBoundingClientRect();
+                                        var hr = host.getBoundingClientRect();
+                                        if (vr.height > 0 && hr.height > 0 && hr.top < vr.bottom && hr.bottom > vr.top) {
+                                            debug.inPlayer++; continue;
+                                        }
+                                    } catch (e) {}
+                                }
                                 var existing = host.querySelector('[data-phoenix-btn]');
                                 if (existing) {
                                     // Recycled row: refresh the target video
@@ -552,14 +566,91 @@ class BrowserFragment : Fragment() {
                         }
                         return null;
                     }
+                    function hideElx(el) {
+                        try { el.style.setProperty('display', 'none', 'important'); } catch (e) {}
+                    }
+                    function isShortsOnly(el) {
+                        // A container may be hidden for Shorts ONLY if
+                        // it holds Shorts links and no normal videos.
+                        // The first version hid any item-section a
+                        // Shorts link appeared in - on the results
+                        // page that section is the WHOLE results
+                        // list, so one Shorts result blanked the page
+                        // (field report 2026-10-22 18:17).
+                        try {
+                            return !!el.querySelector('a[href*="/shorts/"]') &&
+                                !el.querySelector('a[href*="/watch"]');
+                        } catch (e) { return false; }
+                    }
+                    function hideShorts() {
+                        var n = 0;
+                        try {
+                            // Title-based shelf hide: a shelf whose
+                            // own heading reads 'Shorts' goes away as
+                            // a whole (field screenshot 2026-10-22
+                            // 22:29 showed a rendered Shorts shelf).
+                            var shelves = document.querySelectorAll('ytm-rich-shelf-renderer, ytm-shelf-renderer, ytm-item-section-renderer');
+                            for (var si = 0; si < shelves.length; si++) {
+                                var sh2 = shelves[si];
+                                if (sh2.style.display === 'none') continue;
+                                var hd = sh2.querySelector('h2');
+                                if (hd && (hd.textContent || '').trim() === 'Shorts' && isShortsOnly(sh2)) {
+                                    hideElx(sh2); n++;
+                                }
+                            }
+                            var links = document.querySelectorAll('a[href*="/shorts/"]');
+                            for (var i = 0; i < links.length; i++) {
+                                var a2 = links[i];
+                                var target = a2.closest('ytm-reel-shelf-renderer') ||
+                                    a2.closest('ytm-media-item, ytm-video-with-context-renderer, ytm-compact-video-renderer, ytm-rich-item-renderer, ytm-shorts-lockup-view-model');
+                                if (!target) {
+                                    var sec = a2.closest('ytm-rich-shelf-renderer, ytm-item-section-renderer, ytm-shelf-renderer');
+                                    if (sec && isShortsOnly(sec)) target = sec;
+                                }
+                                if (target && target.style.display !== 'none' && isShortsOnly(target)) { hideElx(target); n++; }
+                            }
+                        } catch (e) {}
+                        return n;
+                    }
                     function applyHide() {
                         var hidden = 0;
+                        // The player's unmute chip never shows (user
+                        // law 2026-10-23: like the YouTube app, no
+                        // mute icon). The sound hook in the watch
+                        // actions keeps the video unmuted; this sweep
+                        // (player's top zone only, so the control
+                        // bar's own buttons stay) removes the chip.
+                        try {
+                            var pRoot = document.querySelector('#player-container-id, .html5-video-player, ytm-player');
+                            var pRect = null;
+                            try { pRect = pRoot ? pRoot.getBoundingClientRect() : null; } catch (e) {}
+                            var pb = document.querySelectorAll('#player-container-id button, .html5-video-player button, ytm-player button');
+                            for (var u = 0; u < pb.length; u++) {
+                                var lbl = (pb[u].getAttribute('aria-label') || '');
+                                if (!/unmute/i.test(lbl)) continue;
+                                if (pRect && pRect.height > 0) {
+                                    var bR = null;
+                                    try { bR = pb[u].getBoundingClientRect(); } catch (e) {}
+                                    if (bR && bR.top > pRect.top + pRect.height * 0.45) continue;
+                                }
+                                hideElx(pb[u]);
+                            }
+                        } catch (e) {}
                         for (var i = 0; i < ALL.length; i++) {
                             var els = document.querySelectorAll(ALL[i]);
-                            for (var j = 0; j < els.length; j++) {
+                            for (var j = 0; j < els.length; j++) { hideElx(els[j]); hidden++; }
+                        }
+                        var sh = hideShorts();
+                        if (sh > 0) {
+                            window._phxShortsHidden = (window._phxShortsHidden || 0) + sh;
+                            if (window._phxShortsHidden !== (window._phxShortsReported || 0)) {
+                                window._phxShortsReported = window._phxShortsHidden;
                                 try {
-                                    els[j].style.setProperty('display', 'none', 'important');
-                                    hidden++;
+                                    if (window.PhoenixDownloader && PhoenixDownloader.reportDiag) {
+                                        PhoenixDownloader.reportDiag(JSON.stringify({
+                                            shortsHidden: window._phxShortsHidden, href: location.href
+                                        }));
+                                    }
                                 } catch (e) {}
                             }
                         }
@@ -569,7 +660,8 @@ class BrowserFragment : Fragment() {
                     if (!st) {
                         st = document.createElement('style');
                         st.id = 'phoenix-page-style';
-                        st.textContent = ALL.join(',') + ' { display: none !important; }';
+                        st.textContent = ALL.join(',') + ' { display: none !important; }' +
+                            '.ytp-unmute-button { display: none !important; }';
                         (document.head || document.documentElement).appendChild(st);
                     }
                     var hiddenNow = applyHide();
@@ -753,10 +845,63 @@ class BrowserFragment : Fragment() {
                         }
                         return null;
                     }
+                    // Sound from the first moment, like the YouTube
+                    // app (user law 2026-10-23): a hook on the video
+                    // element only - whenever playback starts or the
+                    // player re-mutes, unmute on the spot. No UI is
+                    // added or moved; with sound on, YouTube's own
+                    // mute icon never appears (the page style hides
+                    // the chip element as a belt-and-braces).
+                    if (!window._phxUnmuteHook) {
+                        window._phxUnmuteHook = true;
+                        var un = function(ev) {
+                            var v = ev && ev.target;
+                            if (!v || v.tagName !== 'VIDEO') return;
+                            try {
+                                if (v.muted || v.volume === 0) {
+                                    v.muted = false; v.volume = 1;
+                                    stats.unmuteTries = (stats.unmuteTries || 0) + 1;
+                                }
+                                if (!v.muted) stats.unmuted = 1;
+                            } catch (e) {}
+                        };
+                        document.addEventListener('volumechange', un, true);
+                        document.addEventListener('playing', un, true);
+                    }
+                    function topCensus(vid) {
+                        // Names the black band above the video
+                        // (user 2026-10-23): rects of the video and
+                        // its container, plus the element chain
+                        // directly above the frame.
+                        if (window._phxTopCensusVid === vid) return;
+                        var v = document.querySelector('video');
+                        if (!v) return;
+                        var r = null;
+                        try { r = v.getBoundingClientRect(); } catch (e) {}
+                        if (!r || r.height === 0) return;
+                        window._phxTopCensusVid = vid;
+                        var pc = document.querySelector('#player-container-id, ytm-player');
+                        var pr = null;
+                        try { pr = pc ? pc.getBoundingClientRect() : null; } catch (e) {}
+                        var chain = [];
+                        try {
+                            var el = document.elementFromPoint(Math.floor(r.left + r.width / 2), Math.max(0, Math.floor(r.top) - 14));
+                            var d = 0;
+                            while (el && d < 6) {
+                                chain.push(el.tagName.toLowerCase() + (el.id ? '#' + el.id : '') + (el.className && typeof el.className === 'string' ? '.' + el.className.split(' ')[0] : ''));
+                                el = el.parentElement; d++;
+                            }
+                        } catch (e) {}
+                        report({watchTop: {vid: vid,
+                            video: {t: Math.round(r.top), b: Math.round(r.bottom), h: Math.round(r.height)},
+                            container: pr ? {t: Math.round(pr.top), b: Math.round(pr.bottom), h: Math.round(pr.height)} : null,
+                            above: chain, scrollY: Math.round(window.scrollY || 0)}});
+                    }
                     function ensure() {
                         try {
                             var vid = currentVid();
                             if (!vid) return 'no-vid';
+                            topCensus(vid);
                             if (location.href.indexOf('/watch') < 0) return 'not-watch';
                             var row = document.getElementById('phoenix-dl-row');
                             if (row && row.getAttribute('data-vid') === vid) return 'exists';
@@ -816,6 +961,28 @@ class BrowserFragment : Fragment() {
                             if (!parent) return 'no-parent';
                             if (before) parent.insertBefore(row, before);
                             else parent.insertBefore(row, after.nextSibling);
+                            // Never sit on the playing video (user
+                            // 2026-10-23): if the row lands inside the
+                            // <video> rect, move it before the
+                            // comments block instead; if that is
+                            // impossible, keep the original anchor
+                            // rather than lose the pill.
+                            try {
+                                var vv = document.querySelector('video');
+                                if (vv) {
+                                    var vvr = vv.getBoundingClientRect();
+                                    var rwr = row.getBoundingClientRect();
+                                    if (vvr.height > 0 && rwr.height > 0 && rwr.top < vvr.bottom - 4 && how !== 'comments') {
+                                        var cm = document.querySelector('ytm-comments-entry-point-header-renderer, ytm-comment-section-renderer');
+                                        var cBlock = cm ? (cm.closest('ytm-item-section-renderer') || cm) : null;
+                                        if (cBlock && cBlock.parentNode) {
+                                            cBlock.parentNode.insertBefore(row, cBlock);
+                                            report({pill: 'overlap-moved', how: how, vid: vid, stats: stats});
+                                            how = 'comments';
+                                        }
+                                    }
+                                }
+                            } catch (e) {}
                             stats.added++;
                             report({pill: 'added', how: how, vid: vid, stats: stats});
                             return 'added-' + how;
