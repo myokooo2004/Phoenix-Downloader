@@ -178,28 +178,38 @@ class DownloadDialogFragment : DialogFragment() {
     private var shownMaxHeight = -1
     private var shownTierCount = -1
     private var userRenamed = false
+    /** Signature of the last rendered list — identical re-renders are skipped. */
+    private var renderedSignature: String? = null
+    /** True once any list (fast or authoritative) has been shown. */
+    private var shownAny = false
 
     private fun fetchFormats() {
         binding.tvFetching.visibility = View.VISIBLE
         lifecycleScope.launch {
-            // One fetch: the manager answers from its cache when a
-            // prewarm already paid for the extraction, else runs the
-            // fast-first attempt chain. (The two-stage /player
-            // advisory list from build 293 was removed 2026-10-22 —
-            // anonymous /player serves no formats; the real speed fix
-            // is that this dialog now OPENS instantly instead of
-            // waiting behind a fetchVideoInfo extraction.)
+            // Twin-engine (user 2026-10-23): render the FASTEST list
+            // first — memory/disk cache or the watch page's own player
+            // summary — then let the authoritative yt-dlp extraction
+            // refine it (sizes), keeping the user's picked tier. (The
+            // build-293 two-stage list died because its source was an
+            // anonymous /player network call; this one reads what
+            // YouTube already delivered to our own WebView.)
+            val fast = YtDlpManager.fastFormats(videoUrl)
+            if (_binding == null) return@launch
+            if (fast != null && fast.video.isNotEmpty()) {
+                renderFormats(fast)
+                binding.tvFetching.visibility = View.GONE
+            }
             val result = YtDlpManager.fetchFormats(videoUrl)
             if (_binding == null) return@launch
             binding.tvFetching.visibility = View.GONE
             result.onSuccess { full ->
                 if (full.video.isEmpty()) {
-                    Toast.makeText(requireContext(), "No formats found", Toast.LENGTH_SHORT).show()
+                    if (!shownAny) Toast.makeText(requireContext(), "No formats found", Toast.LENGTH_SHORT).show()
                 } else {
                     renderFormats(full)
                 }
             }.onFailure {
-                Toast.makeText(requireContext(), "Failed: ${it.message}", Toast.LENGTH_SHORT).show()
+                if (!shownAny) Toast.makeText(requireContext(), "Failed: ${it.message}", Toast.LENGTH_SHORT).show()
             }
         }
         // Dialogs opened straight from a page tap may arrive without
@@ -234,6 +244,11 @@ class DownloadDialogFragment : DialogFragment() {
     /** Render one format list (advisory or authoritative) into the grid. */
     private fun renderFormats(formatsResult: YtDlpManager.FormatsResult) {
         if (formatsResult.video.isEmpty()) return
+        val signature = formatsResult.video.joinToString("|") { "${it.id}:${it.sizeLabel}" } +
+            "#" + (formatsResult.clientUsed ?: "")
+        if (signature == renderedSignature) return
+        renderedSignature = signature
+        shownAny = true
         formatsClient = formatsResult.clientUsed
         shownMaxHeight = formatsResult.maxHeight
         shownTierCount = formatsResult.video.size

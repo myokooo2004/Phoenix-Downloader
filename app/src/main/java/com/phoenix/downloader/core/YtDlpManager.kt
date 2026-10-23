@@ -61,6 +61,171 @@ object YtDlpManager {
         ): Boolean = size > 8
     }
     private val formatsInFlight = HashSet<String>()
+
+    // ---- Twin-engine fast path (user, 2026-10-23: "engine နှစ်လုံး") ----
+    // Engine B is the yt-dlp extraction (authoritative, ~20s). Engine A
+    // is the watch page's OWN player response, read read-only from our
+    // WebView (ytInitialPlayerResponse): YouTube already delivered it,
+    // so it cannot hit the anonymous-/player wall that killed the
+    // 2026-10-22 advisory attempt (UNPLAYABLE / LOGIN_REQUIRED — do not
+    // revive that network call). Advisory results render the dialog
+    // instantly; B's result replaces them authoritatively.
+    private val advisoryCache = HashMap<String, FormatsResult>()
+
+    private fun cacheFormats(key: String, result: FormatsResult) {
+        synchronized(formatsCache) {
+            formatsCache[key] = CachedFormats(result, System.currentTimeMillis())
+        }
+        persistFormats(key, result)
+    }
+
+    // ---- Persistent formats cache (24h, disk) ----
+    // A video whose formats were fetched once renders instantly for a
+    // day, across restarts. Downloads always re-resolve through
+    // yt-dlp's own selector matrix, so a stale LIST costs nothing.
+    private const val DISK_FORMATS_TTL_MS = 24 * 60 * 60 * 1000L
+
+    private fun formatsCacheDir(): java.io.File? = try {
+        val dir = java.io.File(appContext.filesDir, "formats_cache")
+        if (!dir.exists()) dir.mkdirs()
+        dir
+    } catch (e: Exception) { null }
+
+    private fun persistFormats(key: String, result: FormatsResult) {
+        try {
+            val dir = formatsCacheDir() ?: return
+            val name = key.replace(Regex("[^A-Za-z0-9_-]"), "_") + ".json"
+            val file = java.io.File(dir, name)
+            val arr = org.json.JSONArray()
+            for (f in result.video) {
+                arr.put(org.json.JSONObject()
+                    .put("i", f.id).put("l", f.label)
+                    .put("f", f.format).put("s", f.sizeLabel))
+            }
+            val marr = org.json.JSONArray()
+            for (f in result.music) {
+                marr.put(org.json.JSONObject()
+                    .put("i", f.id).put("l", f.label)
+                    .put("f", f.format).put("s", f.sizeLabel).put("a", 1))
+            }
+            val obj = org.json.JSONObject()
+                .put("at", System.currentTimeMillis())
+                .put("max", result.maxHeight)
+                .put("client", result.clientUsed ?: "")
+                .put("video", arr).put("music", marr)
+            file.writeText(obj.toString())
+            // Prune: keep at most 200 files, oldest first.
+            val files = dir.listFiles()?.sortedBy { it.lastModified() } ?: return
+            if (files.size > 200) files.take(files.size - 200).forEach { it.delete() }
+        } catch (e: Exception) { /* cache is best-effort */ }
+    }
+
+    private fun diskFormats(key: String): FormatsResult? = try {
+        val dir = formatsCacheDir() ?: return null
+        val name = key.replace(Regex("[^A-Za-z0-9_-]"), "_") + ".json"
+        val file = java.io.File(dir, name)
+        if (!file.exists()) return null
+        val obj = org.json.JSONObject(file.readText())
+        if (System.currentTimeMillis() - obj.optLong("at", 0) > DISK_FORMATS_TTL_MS) {
+            file.delete(); null
+        } else {
+            fun readArr(a: org.json.JSONArray?, audio: Boolean): List<FormatOption> {
+                val out = mutableListOf<FormatOption>()
+                if (a != null) for (i in 0 until a.length()) {
+                    val o = a.getJSONObject(i)
+                    out.add(FormatOption(
+                        id = o.optString("i"), label = o.optString("l"),
+                        format = o.optString("f"), sizeLabel = o.optString("s"),
+                        isAudio = audio))
+                }
+                return out
+            }
+            FormatsResult(
+                music = readArr(obj.optJSONArray("music"), true),
+                video = readArr(obj.optJSONArray("video"), false),
+                maxHeight = obj.optInt("max", 0),
+                clientUsed = obj.optString("client").ifEmpty { null })
+        }
+    } catch (e: Exception) { null }
+
+    /** Stash an Engine-A (page-derived) advisory list for [url]. */
+    fun stashAdvisory(url: String, result: FormatsResult) {
+        if (result.video.isEmpty()) return
+        synchronized(advisoryCache) { advisoryCache[formatsKey(url)] = result }
+        logNote("fetchFormats.advisory", "stashed url=$url tiers=${result.video.size} max=${result.maxHeight}")
+    }
+
+    /**
+     * The fastest list available WITHOUT an extraction: memory cache,
+     * then the 24h disk cache, then an Engine-A advisory. Null when
+     * nothing is ready — the caller falls back to [fetchFormats].
+     */
+    suspend fun fastFormats(url: String): FormatsResult? = withContext(Dispatchers.IO) {
+        cachedFormats(url)?.let { return@withContext it }
+        val key = formatsKey(url)
+        diskFormats(key)?.let {
+            // Advisory-grade: deliberately NOT promoted into the
+            // 10-minute memory cache, so an open dialog still gets a
+            // fresh authoritative extraction in the background.
+            logNote("fetchFormats.disk", "hit url=$url tiers=${it.video.size}")
+            return@withContext it
+        }
+        synchronized(advisoryCache) { advisoryCache[key] }
+    }
+
+    /**
+     * Build a dialog list from the watch page's player summary
+     * (compact JSON harvested read-only by BrowserFragment):
+     * {id, len, formats:[{itag,mime,h,br,len}], adaptive:[...]}.
+     * Same tier rules as [parseFormatsJson]: ONE per height, MP4
+     * container preferred, then larger size. Sizes come from
+     * contentLength when present, else bitrate x duration estimate.
+     */
+    fun parsePlayerSummary(summary: org.json.JSONObject): FormatsResult? {
+        val lenSec = summary.optInt("len", 0)
+        val bestByHeight = mutableMapOf<Int, FormatOption>()
+        val bestSizeByHeight = mutableMapOf<Int, Long>()
+        var maxHeight = 0
+        fun consider(f: org.json.JSONObject) {
+            val mime = f.optString("mime", "")
+            if (!mime.startsWith("video/")) return
+            val h = f.optInt("h", 0)
+            if (h <= 0) return
+            if (h > maxHeight) maxHeight = h
+            val isMp4 = mime.startsWith("video/mp4")
+            val sizeBytes = f.optString("len", "").toLongOrNull()?.takeIf { it > 0 }
+                ?: run {
+                    val br = f.optLong("br", 0)
+                    if (br > 0 && lenSec > 0) br / 8 * lenSec else 0L
+                }
+            val opt = FormatOption(
+                id = f.optInt("itag", 0).toString(),
+                label = "${h}P" + if (h >= 720) " HD" else "",
+                format = if (isMp4) "MP4" else "WEBM",
+                sizeLabel = formatBytes(sizeBytes),
+                isAudio = false)
+            val cur = bestByHeight[h]
+            val better = when {
+                cur == null -> true
+                opt.format == "MP4" && cur.format != "MP4" -> true
+                opt.format != "MP4" && cur.format == "MP4" -> false
+                else -> sizeBytes > (bestSizeByHeight[h] ?: -1L)
+            }
+            if (better) { bestByHeight[h] = opt; bestSizeByHeight[h] = sizeBytes }
+        }
+        val fmts = summary.optJSONArray("formats")
+        if (fmts != null) for (i in 0 until fmts.length()) consider(fmts.getJSONObject(i))
+        val adap = summary.optJSONArray("adaptive")
+        if (adap != null) for (i in 0 until adap.length()) consider(adap.getJSONObject(i))
+        if (bestByHeight.isEmpty()) return null
+        val sorted = bestByHeight.values.sortedBy {
+            it.label.filter { c -> c.isDigit() }.toIntOrNull() ?: 0
+        }
+        logNote("fetchFormats.pageList", "tiers=${sorted.size} max=$maxHeight [" +
+            sorted.joinToString(", ") { "${it.label}/${it.format}/${it.id}" } + "]")
+        return FormatsResult(music = emptyList(), video = sorted,
+            maxHeight = maxHeight, clientUsed = "page")
+    }
     private val managerScope =
         CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.IO)
 
@@ -341,10 +506,7 @@ object YtDlpManager {
             try {
                 val seeded = parseFormatsJson(json, null, response.err ?: "", url)
                 if (seeded.video.isNotEmpty() || seeded.music.isNotEmpty()) {
-                    synchronized(formatsCache) {
-                        formatsCache[formatsKey(url)] =
-                            CachedFormats(seeded, System.currentTimeMillis())
-                    }
+                    cacheFormats(formatsKey(url), seeded)
                     logNote(
                         "fetchVideoInfo.seed",
                         "formats cached url=$url video=${seeded.video.size} audio=${seeded.music.size}"
@@ -409,10 +571,7 @@ object YtDlpManager {
                 try {
                     val attempt = fetchFormatsOnce(url, client)
                     if (attempt.video.isNotEmpty() || attempt.music.isNotEmpty()) {
-                        synchronized(formatsCache) {
-                            formatsCache[formatsKey(url)] =
-                                CachedFormats(attempt, System.currentTimeMillis())
-                        }
+                        cacheFormats(formatsKey(url), attempt)
                         return@withContext Result.success(attempt)
                     }
                     lastError = Exception(

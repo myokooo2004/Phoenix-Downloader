@@ -88,8 +88,7 @@ class MainActivity : AppCompatActivity() {
     fun showHome() {
         // Home is the browser-base screen since 2026-10-22 (user
         // spec): our top bar over YouTube itself in the in-app
-        // browser. The old native HomeFragment stays in the tree,
-        // unrouted.
+        // browser.
         supportFragmentManager.beginTransaction()
             .replace(R.id.nav_host, com.phoenix.downloader.ui.home.HomeBrowserFragment())
             .commit()
@@ -135,20 +134,6 @@ class MainActivity : AppCompatActivity() {
             binding.bottomNav.selectedItemId = R.id.nav_downloads
             suppressNavListener = false
         }
-    }
-
-    fun openPlayer(url: String, title: String) {
-        supportFragmentManager.beginTransaction()
-            .replace(R.id.nav_host, PlayerFragment.newInstance(url, title))
-            .addToBackStack(null)
-            .commit()
-    }
-
-    fun openVideoDetail(url: String, title: String, thumbnail: String = "", duration: Int = 0) {
-        supportFragmentManager.beginTransaction()
-            .replace(R.id.nav_host, com.phoenix.downloader.ui.detail.VideoDetailFragment.newInstance(url, title, thumbnail, duration))
-            .addToBackStack(null)
-            .commit()
     }
 
     fun openBrowser(url: String) {

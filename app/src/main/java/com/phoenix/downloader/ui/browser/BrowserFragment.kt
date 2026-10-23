@@ -238,8 +238,43 @@ class BrowserFragment : Fragment() {
         val id = com.phoenix.downloader.core.YouTubeApiClient.extractVideoId(url)
         val thumb = if (id != null) "https://i.ytimg.com/vi/$id/hqdefault.jpg" else ""
         val cleanTitle = title.removeSuffix(" - YouTube").trim()
-        DownloadDialogFragment.newInstance(url, cleanTitle, thumb, 0)
-            .show(parentFragmentManager, "DownloadDialog")
+        fun show() {
+            if (_binding == null) return
+            DownloadDialogFragment.newInstance(url, cleanTitle, thumb, 0)
+                .show(parentFragmentManager, "DownloadDialog")
+        }
+        // Twin-engine: when the tap is for the video THIS page is
+        // playing, harvest the page's own player summary (read-only)
+        // so the dialog renders instantly; yt-dlp refines it after.
+        // Any failure just opens the dialog as before.
+        val wv = try { binding.webview } catch (e: Exception) { null }
+        if (id != null && wv != null && url.contains("youtube.com", ignoreCase = true)) {
+            try {
+                val js = "(function(){try{var o=window._phxBuildSummary?window._phxBuildSummary():null;" +
+                    "if(!o||o.id!=='" + id + "'){var s=window._phxPlayerSummary;" +
+                    "if(s&&s.id==='" + id + "')o=s;}" +
+                    "return o?JSON.stringify(o):'';}catch(e){return '';}})();"
+                wv.evaluateJavascript(js) { raw ->
+                    try {
+                        val txt = raw?.trim()?.let {
+                            if (it.startsWith("\""))
+                                org.json.JSONTokener(it).nextValue() as? String
+                            else it
+                        }
+                        if (!txt.isNullOrEmpty() && txt.startsWith("{")) {
+                            val parsed = com.phoenix.downloader.core.YtDlpManager
+                                .parsePlayerSummary(org.json.JSONObject(txt))
+                            if (parsed != null) {
+                                com.phoenix.downloader.core.YtDlpManager.stashAdvisory(url, parsed)
+                            }
+                        }
+                    } catch (e: Exception) { /* advisory is best-effort */ }
+                    show()
+                }
+            } catch (e: Exception) { show() }
+        } else {
+            show()
+        }
     }
 
     private fun injectDownloadButtons(webView: WebView) {
@@ -897,11 +932,35 @@ class BrowserFragment : Fragment() {
                             container: pr ? {t: Math.round(pr.top), b: Math.round(pr.bottom), h: Math.round(pr.height)} : null,
                             above: chain, scrollY: Math.round(window.scrollY || 0)}});
                     }
-                    function ensure() {
+                    // Engine A (twin-engine formats): compact summary of the
+                // page's OWN player response, harvested read-only. The
+                // dialog renders from this instantly while yt-dlp
+                // extracts in the background. Rebuilt when the video
+                // changes; returns the summary object or null.
+                window._phxBuildSummary = function () {
+                    try {
+                        var pr = window.ytInitialPlayerResponse;
+                        if (!pr || !pr.streamingData || !pr.videoDetails) return null;
+                        var id = pr.videoDetails.videoId || '';
+                        if (!id) return null;
+                        if (window._phxPlayerSummary && window._phxPlayerSummary.id === id) return window._phxPlayerSummary;
+                        var out = { id: id, len: parseInt(pr.videoDetails.lengthSeconds || '0', 10) || 0, formats: [], adaptive: [] };
+                        var push = function (f, arr) { arr.push({ itag: f.itag || 0, mime: f.mimeType || '', h: f.height || 0, br: f.bitrate || 0, len: f.contentLength || '' }); };
+                        var sd = pr.streamingData;
+                        (sd.formats || []).forEach(function (f) { push(f, out.formats); });
+                        (sd.adaptiveFormats || []).forEach(function (f) { push(f, out.adaptive); });
+                        if (!out.formats.length && !out.adaptive.length) return null;
+                        window._phxPlayerSummary = out;
+                        return out;
+                    } catch (e) { return null; }
+                };
+
+                function ensure() {
                         try {
                             var vid = currentVid();
                             if (!vid) return 'no-vid';
                             topCensus(vid);
+                    if (window._phxBuildSummary) window._phxBuildSummary();
                             if (location.href.indexOf('/watch') < 0) return 'not-watch';
                             var row = document.getElementById('phoenix-dl-row');
                             if (row && row.getAttribute('data-vid') === vid) return 'exists';

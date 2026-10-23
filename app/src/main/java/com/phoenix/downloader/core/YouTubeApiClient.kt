@@ -56,9 +56,6 @@ object YouTubeApiClient {
     private val RELAY_URLS = listOf(
         "https://script.google.com/macros/s/AKfycbw6REMeVfXlP72GytuRTA_B08isVqB79y5qwz1fZt8fNzGHRLWnaABr1F4HM18G3itcew/exec"
     )
-    // Legacy direct API (kept for reference; not used)
-    private const val API_KEY = "AIzaSyDVpveH9BzSa7QZh7QT7Uh2zMasfEWR8Pw"
-    private const val BASE_URL = "https://www.googleapis.com/youtube/v3/videos"
 
     // --- Worker transport --------------------------------------------------
     // Field evidence (2026-10-21): on the user's MPT line the system DNS
