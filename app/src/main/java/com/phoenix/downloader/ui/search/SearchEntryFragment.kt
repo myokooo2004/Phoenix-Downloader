@@ -69,7 +69,7 @@ class SearchEntryFragment : Fragment() {
             bindHistoryChips()
         }
         binding.btnEntryClear.setOnClickListener { binding.etEntryQuery.text?.clear() }
-        binding.btnEntryGo.setOnClickListener { submit(binding.etEntryQuery.text.toString()) }
+        binding.btnEntrySearch.setOnClickListener { submit(binding.etEntryQuery.text.toString()) }
         binding.etEntryQuery.setOnEditorActionListener { _, actionId, _ ->
             if (actionId == EditorInfo.IME_ACTION_SEARCH || actionId == EditorInfo.IME_ACTION_DONE) {
                 submit(binding.etEntryQuery.text.toString())
@@ -87,7 +87,6 @@ class SearchEntryFragment : Fragment() {
             binding.etEntryQuery.setText(currentQuery)
             binding.etEntryQuery.selectAll()
             binding.btnEntryClear.visibility = View.VISIBLE
-            binding.btnEntryGo.text = "SEARCH"
         }
         binding.etEntryQuery.addTextChangedListener(object : TextWatcher {
             override fun afterTextChanged(s: Editable?) {
@@ -109,11 +108,6 @@ class SearchEntryFragment : Fragment() {
     private fun onQueryChanged(raw: String) {
         val q = raw.trim()
         binding.btnEntryClear.visibility = if (raw.isEmpty()) View.GONE else View.VISIBLE
-        binding.btnEntryGo.text = when {
-            q.isEmpty() -> "ENTER"
-            looksLikeUrl(q) -> "ENTER"
-            else -> "SEARCH"
-        }
         suggestJob?.cancel()
         if (q.isEmpty()) {
             showSections()
