@@ -150,6 +150,21 @@ class MainActivity : AppCompatActivity() {
             .commit()
     }
 
+    /**
+     * The query of the YouTube search currently shown in the home
+     * browser, if any — the search entry field mirrors it, so the
+     * place the user searched always holds the current YouTube
+     * search (user spec 2026-10-23).
+     */
+    fun currentSearchQuery(): String? {
+        val home = supportFragmentManager.findFragmentById(R.id.nav_host)
+            as? com.phoenix.downloader.ui.home.HomeBrowserFragment ?: return null
+        val url = home.currentUrl() ?: return null
+        if (!url.contains("/results")) return null
+        val q = android.net.Uri.parse(url).getQueryParameter("search_query")
+        return q?.takeIf { it.isNotEmpty() }
+    }
+
     /** The search entry screen (history + hot searches + live suggestions). */
     fun openSearchEntry() {
         supportFragmentManager.beginTransaction()

@@ -76,6 +76,19 @@ class SearchEntryFragment : Fragment() {
                 true
             } else false
         }
+        // Mirror the current YouTube search into the field (user
+        // spec 2026-10-23): the place the user searched always holds
+        // the current search, selected so typing replaces it and one
+        // clear leaves an empty field for the next search. Runs
+        // before the text watcher is attached so no suggestion fetch
+        // fires for the mirrored text.
+        val currentQuery = (activity as? MainActivity)?.currentSearchQuery()
+        if (!currentQuery.isNullOrEmpty()) {
+            binding.etEntryQuery.setText(currentQuery)
+            binding.etEntryQuery.selectAll()
+            binding.btnEntryClear.visibility = View.VISIBLE
+            binding.btnEntryGo.text = "SEARCH"
+        }
         binding.etEntryQuery.addTextChangedListener(object : TextWatcher {
             override fun afterTextChanged(s: Editable?) {
                 onQueryChanged(s?.toString().orEmpty())
@@ -146,15 +159,16 @@ class SearchEntryFragment : Fragment() {
             }
         } else {
             SearchHistoryStore.add(requireContext(), text)
-            // COVER (user decision 2026-10-22 18:49): YouTube's own
-            // results page freezes in our WebView (Chrome loads the
-            // same URL fine - the fault is on our side, un-isolated
-            // after two builds), so a query goes to OUR native
-            // results screen instead. The data is still YouTube's own
-            // search (DirectYouTube/InnerTube, Worker fallback) -
-            // only the surface is ours: list with per-item download
-            // buttons; a tap opens the video in the browser.
-            (activity as? MainActivity)?.openSearch(text)
+            // YouTube search rides YouTube's OWN results page in the
+            // home browser, under our overlay (user decision
+            // 2026-10-23, reversing the 2026-10-22 native cover after
+            // the native fetch chain froze in the field): the query
+            // becomes the results URL, the videos below are YouTube's
+            // page with our download buttons, and re-searching is
+            // just another navigation - it cannot wedge.
+            val resultsUrl = "https://m.youtube.com/results?search_query=" +
+                java.net.URLEncoder.encode(text, "UTF-8")
+            (activity as? MainActivity)?.showHomeWithUrl(resultsUrl)
         }
     }
 

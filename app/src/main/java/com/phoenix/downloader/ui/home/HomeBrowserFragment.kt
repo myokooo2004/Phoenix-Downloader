@@ -184,6 +184,12 @@ class HomeBrowserFragment : Fragment() {
         }
     }
 
+    /** The embedded browser's current url (for search-field sync). */
+    fun currentUrl(): String? {
+        val browser = childFragmentManager.findFragmentByTag(BROWSER_TAG) as? BrowserFragment
+        return browser?.currentUrl()
+    }
+
     /** Load a url in the embedded browser (search submits land here). */
     fun navigate(url: String) {
         val browser = childFragmentManager.findFragmentByTag(BROWSER_TAG) as? BrowserFragment
