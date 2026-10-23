@@ -38,23 +38,15 @@ class BrowserFragment : Fragment() {
 
     private var _binding: FragmentBrowserBinding? = null
     private val binding get() = _binding!!
-
-    /** Host hooks (set by HomeBrowserFragment in home mode): page URL
-     *  changes and WebView scroll position, for the top-bar
-     *  auto-hide behavior. Null in the standalone browser. */
+    private var pendingVideoUrl: String? = null
     var onHostUrlChanged: ((String) -> Unit)? = null
     var onHostScroll: ((Int) -> Unit)? = null
 
-    /** The WebView's current URL, if the view exists. */
     fun currentUrl(): String? = if (_binding != null) binding.webview.url else null
 
-    /**
-     * Standalone (pushed) browser only: on a YouTube watch page the
-     * toolbar and bottom bar hide too, so the video is full at the
-     * top (user spec 2026-10-22 — the same rule the home browser
-     * follows; in home mode both bars are always hidden already).
-     * The phone back key still leaves the page.
-     */
+    // Standalone browser only: on a watch page our own toolbar and
+    // bottom bar hide so the video gets the full screen (the user's
+    // spec: tap a video -> full video, url/download bars hidden).
     private fun updateStandaloneChrome(url: String) {
         if (arguments?.getBoolean(ARG_HOME) == true) return
         if (_binding == null) return
@@ -64,7 +56,6 @@ class BrowserFragment : Fragment() {
         binding.toolbarBrowser.visibility = vis
         binding.bottomBar.visibility = vis
     }
-    private var pendingVideoUrl: String? = null
 
     override fun onCreateView(
         inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?
@@ -94,7 +85,7 @@ class BrowserFragment : Fragment() {
         wv.settings.userAgentString = wv.settings.userAgentString.replace("; wv", "")
         // Default TLS handling (no onReceivedSslError override) -> no security errors.
 
-        // JavaScript bridge for per-video download buttons (user-style)
+        // JavaScript bridge for per-video download buttons
         wv.addJavascriptInterface(object {
             @android.webkit.JavascriptInterface
             fun onDownloadClick(videoUrl: String, title: String) {
@@ -143,10 +134,9 @@ class BrowserFragment : Fragment() {
             }
 
             override fun onPageFinished(view: WebView, url: String) {
-                // The document finished: complete the bar. An SPA
-                // keeps fetching in the background afterwards, and
-                // leaving the bar at <100 forever reads as 'stuck'
-                // (user 2026-10-22 22:34).
+                // Document finished: complete the progress bar (an SPA
+                // keeps fetching in the background; a bar stuck <100
+                // reads as 'still loading' - user 2026-10-22 22:34).
                 binding.pbPage.isVisible = false
                 // SPA sites (YouTube/Facebook) update URL via JS; re-check on finish
                 val currentUrl = view.url ?: url
@@ -159,7 +149,7 @@ class BrowserFragment : Fragment() {
                         requireContext(), currentUrl
                     )
                 } catch (e: Exception) { /* ignore */ }
-                // Inject user-style per-video download buttons
+                // Inject per-video download buttons
                 injectDownloadButtons(view)
                 // Inject our action bar on YouTube watch pages
                 injectWatchActions(view)
@@ -353,76 +343,35 @@ class BrowserFragment : Fragment() {
                     function styleItem(host) {
                         // Rounded thumbnail + YouTube's own view count
                         // ON the thumbnail (user mockups v5/v6
-                        // 2026-10-22). Geometry is re-evaluated on
-                        // EVERY call: the first pass can run while the
-                        // card is still a narrow skeleton, and locking
-                        // radius/margins then left the first cards
-                        // full-bleed with square corners while later
-                        // cards were inset (field screenshots
-                        // 2026-10-22 15:36). The player surface is
-                        // never styled: an autoplay next-preview that
-                        // overlaps it got a views stamp in the field.
+                        // 2026-10-22). Big cards get the inset look and
+                        // the views badge; small rows just get rounded
+                        // corners. Counted in stats (log proof).
                         try {
                             var img = host.querySelector('img');
                             if (!img) return;
                             var box = img.closest('a') || img.parentElement;
                             if (!box) return;
-                            if (box.querySelector('video')) return;
                             var big = false;
                             try { big = box.getBoundingClientRect().width > 250; } catch (e) {}
-                            try {
-                                var plr = document.querySelector('#player-container-id, ytm-player');
-                                if (plr) {
-                                    var br = box.getBoundingClientRect();
-                                    var pr = plr.getBoundingClientRect();
-                                    if (br.height > 0 && pr.height > 0 &&
-                                        br.top < pr.bottom && br.bottom > pr.top &&
-                                        br.left < pr.right && br.right > pr.left) return;
-                                }
-                            } catch (e) {}
-                            try {
-                                if (window.getComputedStyle(box).position === 'static') {
-                                    box.style.position = 'relative';
-                                }
-                            } catch (e) {}
-                            box.style.borderRadius = big ? '18px' : '10px';
-                            box.style.overflow = 'hidden';
-                            try {
-                                box.classList.add(big ? 'phx-tb' : 'phx-tb-sm');
-                                box.classList.remove(big ? 'phx-tb-sm' : 'phx-tb');
-                            } catch (e) {}
-                            box.style.marginLeft = big ? '10px' : '';
-                            box.style.marginRight = big ? '10px' : '';
                             if (!box.hasAttribute('data-phoenix-round')) {
                                 box.setAttribute('data-phoenix-round', '1');
+                                try {
+                                    if (window.getComputedStyle(box).position === 'static') {
+                                        box.style.position = 'relative';
+                                    }
+                                } catch (e) {}
+                                box.style.borderRadius = big ? '18px' : '10px';
+                                box.style.overflow = 'hidden';
+                                if (big) {
+                                    box.style.marginLeft = '10px';
+                                    box.style.marginRight = '10px';
+                                }
                                 stats.rounded = (stats.rounded || 0) + 1;
                                 debug.rounded = (debug.rounded || 0) + 1;
                             }
-                            var badge = box.querySelector('[data-phoenix-views]');
                             if (big) {
-                                // Views text comes from the META block
-                                // (title/channel/views/time) ONLY. The
-                                // old code matched against the whole
-                                // host text - which contains our own
-                                // badge and the thumbnail duration -
-                                // and the stamp corrupted itself a
-                                // little more on every pass (field
-                                // screenshots 2026-10-22 22:30: digit
-                                // repeats + the real count).
-                                var m = null;
-                                var h3v = host.querySelector('h3');
-                                var climbN = h3v;
-                                for (var cd = 0; cd < 3 && climbN && climbN.parentElement && !m; cd++) {
-                                    var par = climbN.parentElement;
-                                    var sib = '';
-                                    for (var sc = 0; sc < par.childNodes.length; sc++) {
-                                        var cn = par.childNodes[sc];
-                                        if (cn !== climbN) sib += (cn.textContent || '');
-                                    }
-                                    var mm = sib.match(/([\d.,]+\s*[KMB]?\s*views?)/i);
-                                    if (mm && mm[1].length <= 24) m = mm;
-                                    climbN = par;
-                                }
+                                var m = (host.textContent || '').match(/([\d.,]+\s*[KMB]?\s*views?)/i);
+                                var badge = box.querySelector('[data-phoenix-views]');
                                 if (m) {
                                     var txt = m[1].replace(/\s+/g, ' ').trim();
                                     if (!badge) {
@@ -439,44 +388,12 @@ class BrowserFragment : Fragment() {
                                 } else if (badge) {
                                     badge.remove();
                                 }
-                            } else if (badge) {
-                                badge.remove();
                             }
                         } catch (e) {}
                     }
-                    function padMeta(host) {
-                        // Keep the meta text out of the button's
-                        // corner: on long bylines the channel/views/
-                        // time text ran UNDER the icon (field
-                        // screenshot 2026-10-22 16:11). Give the
-                        // item's text block right padding once; the
-                        // text then truncates before the button zone.
-                        try {
-                            if (host.getAttribute('data-phoenix-pad') === '1') return;
-                            var h3 = host.querySelector('h3');
-                            if (!h3) return;
-                            var img = host.querySelector('img');
-                            var node = h3, padEl = null;
-                            for (var d = 0; d < 4; d++) {
-                                node = node.parentElement;
-                                if (!node || node === host) break;
-                                if (/views/i.test(node.textContent || '')) { padEl = node; break; }
-                                if (img && node.contains(img)) break;
-                            }
-                            var el = padEl || h3.parentElement;
-                            if (el && el !== host) {
-                                el.style.paddingRight = '54px';
-                                host.setAttribute('data-phoenix-pad', '1');
-                                stats.padded = (stats.padded || 0) + 1;
-                            }
-                        } catch (e) {}
-                    }
-                    function countWatchAnchors() {
-                        try { return document.querySelectorAll('a[href*="watch"]').length; } catch (e) { return -1; }
-                    }
-                    function addButtons(fullPass) {
+                    function addButtons() {
                         stats.passes++;
-                        debug.added = 0; debug.refreshed = 0; debug.rounded = 0; debug.views = 0; debug.noCard = 0;
+                        debug.added = 0; debug.refreshed = 0; debug.rounded = 0; debug.views = 0;
                         try {
                             var links = document.querySelectorAll('a[href*="watch"]');
                             debug.anchors = links.length;
@@ -492,55 +409,15 @@ class BrowserFragment : Fragment() {
                                     viaFallback = !!host;
                                 }
                                 if (!host) { debug.noHost++; continue; }
-                                // Card-level host: a thumb-only host
-                                // parks the button ON the thumbnail
-                                // (field screenshots 2026-10-22 15:36).
-                                // Climb while the parent still holds
-                                // exactly this one video and adds the
-                                // title the host lacks.
-                                try {
-                                    var cg = 0;
-                                    while (cg++ < 3 && !host.querySelector('h3') && host.parentElement) {
-                                        var par = host.parentElement;
-                                        var pas = par.querySelectorAll('a[href*="watch"]');
-                                        var pseen = {}, pd = 0;
-                                        for (var pi = 0; pi < pas.length; pi++) {
-                                            var pm = (pas[pi].getAttribute('href') || '').match(/[?&]v=([\w-]{11})/);
-                                            if (pm && !pseen[pm[1]]) { pseen[pm[1]] = 1; pd++; }
-                                        }
-                                        if (pd === 1 && par.querySelector('h3')) { host = par; } else { break; }
-                                    }
-                                } catch (e) {}
-                                // Card-only rule (user verdict
-                                // 2026-10-22 15:57: buttons sat ON the
-                                // up-next thumbnails): a fallback host
-                                // that still has no title is not a card -
-                                // skip this pass instead of parking the
-                                // button on the thumbnail. The retries
-                                // catch the item once its card exists.
-                                if (viaFallback && !host.querySelector('h3')) {
-                                    debug.noCard = (debug.noCard || 0) + 1;
-                                    continue;
-                                }
                                 if (!host.querySelector('img')) { debug.noThumb++; continue; }
                                 if (host.closest('ytm-player,#player,.html5-video-player,ytm-inline-player')) {
                                     debug.inPlayer++; continue;
                                 }
                                 var existing = host.querySelector('[data-phoenix-btn]');
                                 if (existing) {
-                                    // Recycled row: refresh the target
-                                    // video id cheaply on every pass;
-                                    // the expensive geometry re-check
-                                    // (styleItem/padMeta - forced layouts)
-                                    // runs only on the 1s burst passes.
-                                    // Running it on EVERY mutation pass
-                                    // saturated the page's main thread
-                                    // and starved YouTube's own rendering
-                                    // (field 2026-10-22: blank pages).
-                                    if (fullPass) { styleItem(host); padMeta(host); }
-                                    if (existing.getAttribute('data-vid') !== vid) {
-                                        existing.setAttribute('data-vid', vid);
-                                    }
+                                    // Recycled row: refresh the target video
+                                    if (existing.getAttribute('data-vid') !== vid) styleItem(host);
+                                    existing.setAttribute('data-vid', vid);
                                     debug.refreshed++; stats.refreshed++;
                                     if (!debug.vis) debug.vis = probeVis(existing);
                                     continue;
@@ -571,7 +448,6 @@ class BrowserFragment : Fragment() {
                                 }, true);
                                 host.appendChild(btn);
                                 styleItem(host);
-                                padMeta(host);
                                 debug.added++; stats.added++;
                                 if (viaFallback) { debug.fbAdded++; stats.fbAdded = (stats.fbAdded || 0) + 1; }
                                 if (!debug.vis) debug.vis = probeVis(btn);
@@ -579,7 +455,7 @@ class BrowserFragment : Fragment() {
                             // Mix / playlist panel header: one red ⬇ at
                             // the header's right (left of YouTube's own
                             // share icon) for the CURRENT video — the
-                            // user's Mix reference screenshot shows it
+                            // the user's Mix screenshot shows it
                             // there (2026-10-22).
                             try {
                                 var panel = document.querySelector('ytm-playlist-panel-renderer');
@@ -613,53 +489,19 @@ class BrowserFragment : Fragment() {
                                 }
                             } catch (e6) {}
                         } catch (e) { debug.err = String(e && e.message || e); }
-                        window._phxLastAnchorCount = countWatchAnchors();
-                        var fa2 = document.querySelector('a[href*="watch"]');
-                        window._phxFirstVid = fa2 ? (fa2.getAttribute('href') || '') : '';
                         return debug;
                     }
-                    var d = addButtons(true);
-                    // One burst per page at a time: every SPA
-                    // navigation re-injects, and stacked 1s bursts
-                    // from earlier navigations kept the main thread
-                    // busy long after their page was gone.
-                    if (window._phxBtnTimer) clearInterval(window._phxBtnTimer);
+                    var d = addButtons();
                     var tries = 0;
                     var timer = setInterval(function() {
                         tries++;
-                        addButtons(true);
-                        if (tries >= 10) { clearInterval(timer); window._phxBtnTimer = null; reportOnce(); }
+                        addButtons();
+                        if (tries >= 10) { clearInterval(timer); reportOnce(); }
                     }, 1000);
-                    window._phxBtnTimer = timer;
                     setTimeout(reportOnce, 25000);
                     if (!window._phoenixObserver && document.body) {
                         try {
-                            window._phoenixObserver = new MutationObserver(function() {
-                                // Debounced AND causally gated
-                                // (2026-10-22): a pass runs only when
-                                // the watch-anchor COUNT changed -
-                                // i.e. new items actually arrived.
-                                // Scrolling makes YouTube clone/re-
-                                // render rows constantly; passes that
-                                // re-ran for those mutations kept
-                                // re-stamping the existing buttons on
-                                // every scroll-settle (the user saw
-                                // the buttons 'arrive' with each
-                                // scroll, and the churn loaded the
-                                // page). With the count unchanged
-                                // there is nothing new to add.
-                                if (window._phxBtnPend) return;
-                                window._phxBtnPend = setTimeout(function() {
-                                    window._phxBtnPend = null;
-                                    var c = countWatchAnchors();
-                                    var firstA = document.querySelector('a[href*="watch"]');
-                                    var firstVid = firstA ? (firstA.getAttribute('href') || '') : '';
-                                    if (c >= 0 && c === (window._phxLastAnchorCount || 0) &&
-                                        firstVid === (window._phxFirstVid || '')) return;
-                                    window._phxFirstVid = firstVid;
-                                    addButtons(false);
-                                }, 650);
-                            });
+                            window._phoenixObserver = new MutationObserver(function() { addButtons(); });
                             window._phoenixObserver.observe(document.body, { childList: true, subtree: true });
                         } catch (e3) { debug.err = 'observer: ' + e3; }
                     }
@@ -683,15 +525,19 @@ class BrowserFragment : Fragment() {
     }
 
     /**
-     * Page chrome control (user spec 2026-10-22, extended same day):
-     * hide YouTube's header AND bottom pivot bar AND the filter
-     * chips bar; hide Shorts shelves/items (the user does not want
-     * Shorts in the feeds); round item thumbnails at the CSS layer
-     * too (the per-item inline styling alone flickered round/square
-     * as YouTube rebuilt cards). Everything is census-reported per
-     * page so a miss is diagnosable from the log, never guessed.
-     * The player surface itself is never rounded or hidden - the
-     * playing video stays full-bleed and square, as specified.
+     * Hide YouTube's own chrome on EVERY page (user spec 2026-10-22):
+     * the header (logo icon, "YouTube" wordmark, Open App, search,
+     * three dots) AND the bottom button/pivot bar — shown nowhere.
+     *
+     * Second attempt: build 299's census showed the candidates DO
+     * exist (header element, ytm-mobile-topbar-renderer, ytm-header
+     * depending on the page), yet the bar stayed visible — a style
+     * element alone is not proof of hiding. Now every matched element
+     * ALSO gets display:none via the CSSOM (setProperty with
+     * !important — not subject to style-element CSP), re-applied on
+     * an interval + MutationObserver because YouTube's SPA swaps the
+     * elements. The census (now including the pivot bar) is reported
+     * once per page for the log.
      */
     private fun injectPageStyle(webView: WebView) {
         val js = """
@@ -699,100 +545,21 @@ class BrowserFragment : Fragment() {
                 try {
                     var HEAD = ['ytm-header', 'header', '#header', 'ytm-mobile-topbar-renderer', '#mobile-topbar'];
                     var PIVOT = ['ytm-pivot-bar-renderer', '#pivot-bar', 'ytm-pivot-bar-item-renderer'];
-                    var CHIPS = ['ytm-feed-filter-chip-bar-renderer', 'ytm-chip-bar-renderer', '#chips-wrapper', 'ytm-search-filter-chip-bar-renderer'];
-                    var ALL = HEAD.concat(PIVOT).concat(CHIPS);
-                    var THUMB_SELS = ['ytm-media-item .media-item-thumbnail-container',
-                        'ytm-video-with-context-renderer .video-thumbnail-container',
-                        'ytm-compact-video-renderer .compact-video-thumbnail-container',
-                        'ytm-playlist-panel-video-renderer .media-item-thumbnail-container',
-                        'ytm-rich-item-renderer .video-thumbnail-container'];
+                    var ALL = HEAD.concat(PIVOT);
                     function firstMatch(list) {
                         for (var i = 0; i < list.length; i++) {
                             if (document.querySelector(list[i])) return list[i];
                         }
                         return null;
                     }
-                    function hideEl(el) {
-                        try { el.style.setProperty('display', 'none', 'important'); } catch (e) {}
-                    }
-                    function isShortsOnly(el) {
-                        // A container may be hidden for Shorts ONLY if
-                        // it holds Shorts links and no normal videos.
-                        // The first version hid any item-section a
-                        // Shorts link appeared in - on the results
-                        // page that section is the WHOLE results
-                        // list, so one Shorts result blanked the page
-                        // (field report 2026-10-22 18:17).
-                        try {
-                            return !!el.querySelector('a[href*="/shorts/"]') &&
-                                !el.querySelector('a[href*="/watch"]');
-                        } catch (e) { return false; }
-                    }
-                    function hideShorts() {
-                        var n = 0;
-                        try {
-                            // Title-based shelf hide: a shelf whose
-                            // own heading reads 'Shorts' goes away as
-                            // a whole (covers shelf tags the link
-                            // walk below does not know - field
-                            // screenshot 2026-10-22 22:29 showed a
-                            // rendered Shorts shelf).
-                            var shelves = document.querySelectorAll('ytm-rich-shelf-renderer, ytm-shelf-renderer, ytm-item-section-renderer');
-                            for (var si = 0; si < shelves.length; si++) {
-                                var sh2 = shelves[si];
-                                if (sh2.style.display === 'none') continue;
-                                var hd = sh2.querySelector('h2');
-                                if (hd && (hd.textContent || '').trim() === 'Shorts' && isShortsOnly(sh2)) {
-                                    hideEl(sh2); n++;
-                                }
-                            }
-                            var links = document.querySelectorAll('a[href*="/shorts/"]');
-                            for (var i = 0; i < links.length; i++) {
-                                var a = links[i];
-                                var target = a.closest('ytm-reel-shelf-renderer') ||
-                                    a.closest('ytm-media-item, ytm-video-with-context-renderer, ytm-compact-video-renderer, ytm-rich-item-renderer, ytm-shorts-lockup-view-model');
-                                if (!target) {
-                                    var sec = a.closest('ytm-rich-shelf-renderer, ytm-item-section-renderer, ytm-shelf-renderer');
-                                    if (sec && isShortsOnly(sec)) target = sec;
-                                }
-                                if (target && target.style.display !== 'none' && isShortsOnly(target)) { hideEl(target); n++; }
-                            }
-                        } catch (e) {}
-                        return n;
-                    }
                     function applyHide() {
                         var hidden = 0;
-                        try {
-                            var pRoot = document.querySelector('#player-container-id, .html5-video-player, ytm-player');
-                            var pRect = null;
-                            try { pRect = pRoot ? pRoot.getBoundingClientRect() : null; } catch (e) {}
-                            var pb = document.querySelectorAll('#player-container-id button, .html5-video-player button, ytm-player button');
-                            for (var u = 0; u < pb.length; u++) {
-                                var lbl = (pb[u].getAttribute('aria-label') || '');
-                                if (!/unmute/i.test(lbl)) continue;
-                                if (pRect && pRect.height > 0) {
-                                    var bR = null;
-                                    try { bR = pb[u].getBoundingClientRect(); } catch (e) {}
-                                    if (bR && bR.top > pRect.top + pRect.height * 0.45) continue;
-                                }
-                                hideEl(pb[u]);
-                            }
-                        } catch (e) {}
                         for (var i = 0; i < ALL.length; i++) {
                             var els = document.querySelectorAll(ALL[i]);
-                            for (var j = 0; j < els.length; j++) { hideEl(els[j]); hidden++; }
-                        }
-                        var sh = hideShorts();
-                        if (sh > 0) {
-                            window._phxShortsHidden = (window._phxShortsHidden || 0) + sh;
-                            if (window._phxShortsHidden !== (window._phxShortsReported || 0)) {
-                                window._phxShortsReported = window._phxShortsHidden;
+                            for (var j = 0; j < els.length; j++) {
                                 try {
-                                    if (window.PhoenixDownloader && PhoenixDownloader.reportDiag) {
-                                        PhoenixDownloader.reportDiag(JSON.stringify({
-                                            shortsHidden: window._phxShortsHidden, href: location.href
-                                        }));
-                                    }
+                                    els[j].style.setProperty('display', 'none', 'important');
+                                    hidden++;
                                 } catch (e) {}
                             }
                         }
@@ -802,57 +569,21 @@ class BrowserFragment : Fragment() {
                     if (!st) {
                         st = document.createElement('style');
                         st.id = 'phoenix-page-style';
-                        st.textContent = ALL.join(',') + ' { display: none !important; }' +
-                            '.ytp-unmute-button { display: none !important; }' +
-                            THUMB_SELS.join(',') + ' { border-radius: 14px !important; overflow: hidden !important; }' +
-                            '.phx-tb { border-radius: 18px !important; overflow: hidden !important; }' +
-                            '.phx-tb-sm { border-radius: 10px !important; overflow: hidden !important; }';
+                        st.textContent = ALL.join(',') + ' { display: none !important; }';
                         (document.head || document.documentElement).appendChild(st);
                     }
                     var hiddenNow = applyHide();
-                    if (window._phxChromeTimer) clearInterval(window._phxChromeTimer);
                     var tries = 0;
                     var timer = setInterval(function() {
                         tries++;
                         applyHide();
-                        if (tries >= 12) { clearInterval(timer); window._phxChromeTimer = null; }
+                        if (tries >= 12) clearInterval(timer);
                     }, 1000);
-                    window._phxChromeTimer = timer;
                     if (!window._phoenixChromeObserver && document.body) {
                         try {
-                            window._phoenixChromeObserver = new MutationObserver(function() {
-                                if (window._phxChromePend) return;
-                                window._phxChromePend = setTimeout(function() {
-                                    window._phxChromePend = null;
-                                    applyHide();
-                                }, 800);
-                            });
+                            window._phoenixChromeObserver = new MutationObserver(function() { applyHide(); });
                             window._phoenixChromeObserver.observe(document.body, { childList: true, subtree: true });
                         } catch (e) {}
-                    }
-                    // Late census (added 2026-10-22): the first
-                    // census fires on an empty DOM, so it could
-                    // never prove the chips bar, the Shorts shelves
-                    // or whether items rendered at all. Re-report
-                    // once after 5s with the loaded page's numbers.
-                    if (!window._phxLateCensus) {
-                        window._phxLateCensus = 1;
-                        setTimeout(function() {
-                            try {
-                                var lc = {};
-                                for (var i2 = 0; i2 < ALL.length; i2++) lc[ALL[i2]] = !!document.querySelector(ALL[i2]);
-                                if (window.PhoenixDownloader && PhoenixDownloader.reportDiag) {
-                                    PhoenixDownloader.reportDiag(JSON.stringify({
-                                        lateCensus: true,
-                                        census: lc,
-                                        anchorsNow: document.querySelectorAll('a[href*="watch"]').length,
-                                        shortsLinks: document.querySelectorAll('a[href*="/shorts/"]').length,
-                                        shortsHidden: window._phxShortsHidden || 0,
-                                        href: location.href
-                                    }));
-                                }
-                            } catch (e) {}
-                        }, 5000);
                     }
                     if (!window._phoenixChromeSent) window._phoenixChromeSent = {};
                     var key = 'chrome:' + location.href.split('&')[0];
@@ -860,22 +591,17 @@ class BrowserFragment : Fragment() {
                         window._phoenixChromeSent[key] = 1;
                         var census = {};
                         for (var c = 0; c < ALL.length; c++) census[ALL[c]] = !!document.querySelector(ALL[c]);
-                        var thumbCensus = {};
-                        for (var t = 0; t < THUMB_SELS.length; t++) {
-                            thumbCensus[THUMB_SELS[t]] = document.querySelectorAll(THUMB_SELS[t]).length;
-                        }
                         try {
                             if (window.PhoenixDownloader && PhoenixDownloader.reportDiag) {
                                 PhoenixDownloader.reportDiag(JSON.stringify({
-                                    chrome: {header: firstMatch(HEAD) || 'none', pivot: firstMatch(PIVOT) || 'none', chips: firstMatch(CHIPS) || 'none', hidden: hiddenNow},
+                                    chrome: {header: firstMatch(HEAD) || 'none', pivot: firstMatch(PIVOT) || 'none', hidden: hiddenNow},
                                     census: census,
-                                    thumbSel: thumbCensus,
                                     href: location.href
                                 }));
                             }
                         } catch (e) {}
                     }
-                    return JSON.stringify({header: firstMatch(HEAD) || 'none', pivot: firstMatch(PIVOT) || 'none', chips: firstMatch(CHIPS) || 'none', hidden: hiddenNow});
+                    return JSON.stringify({header: firstMatch(HEAD) || 'none', pivot: firstMatch(PIVOT) || 'none', hidden: hiddenNow});
                 } catch (e) {
                     return JSON.stringify({err: 'outer: ' + (e && e.message || e)});
                 }
@@ -993,12 +719,8 @@ class BrowserFragment : Fragment() {
                         for (var d = 0; d < maxDepth && node && node.parentElement; d++) {
                             node = node.parentElement;
                             if (!node || node === document.body) break;
-                            // A block containing the player is the whole
-                            // watch column, not metadata - the pill landed
-                            // above the player in the field (2026-10-22).
                             var r = node.getBoundingClientRect();
-                            if (r.width > window.innerWidth * 0.85 && node.querySelectorAll('button, [role="button"]').length >= 2 &&
-                                !node.querySelector('ytm-player, #player-container-id, video')) {
+                            if (r.width > window.innerWidth * 0.85 && node.querySelectorAll('button, [role="button"]').length >= 2) {
                                 return node;
                             }
                         }
@@ -1036,68 +758,8 @@ class BrowserFragment : Fragment() {
                             var vid = currentVid();
                             if (!vid) return 'no-vid';
                             if (location.href.indexOf('/watch') < 0) return 'not-watch';
-                            // Unmute (user law 2026-10-22: NEVER
-                            // muted on watch pages - sound from the
-                            // first moment). A page opened from our
-                            // native results has no in-page tap, so
-                            // YouTube starts muted. A timed window
-                            // raced the player; instead install
-                            // persistent listeners ONCE: any mute the
-                            // player applies is undone on the spot,
-                            // for the whole life of the page.
-                            try {
-                                if (!window._phxUnmuteHook) {
-                                    window._phxUnmuteHook = 1;
-                                    var unmuteFn = function(ev) {
-                                        var v = ev && ev.target;
-                                        if (v && v.tagName === 'VIDEO' && v.muted) {
-                                            v.muted = false;
-                                            try { v.volume = 1; } catch (e) {}
-                                            stats.unmuteTries = (stats.unmuteTries || 0) + 1;
-                                        }
-                                    };
-                                    document.addEventListener('volumechange', unmuteFn, true);
-                                    document.addEventListener('playing', unmuteFn, true);
-                                }
-                                var vel0 = document.querySelector('video');
-                                if (vel0 && vel0.muted) {
-                                    vel0.muted = false;
-                                    try { vel0.volume = 1; } catch (e) {}
-                                    stats.unmuteTries = (stats.unmuteTries || 0) + 1;
-                                }
-                                if (vel0 && !vel0.muted && !vel0.paused && vel0.readyState > 0 && !stats.unmuted) {
-                                    stats.unmuted = 1;
-                                }
-                            } catch (e) {}
                             var row = document.getElementById('phoenix-dl-row');
-                            if (row && row.getAttribute('data-vid') === vid) {
-                                // Fit guard: the pill belongs UNDER the
-                                // metadata - if it sits above the
-                                // player's bottom edge it is misplaced;
-                                // drop it and let the ladder re-anchor.
-                                var plEl = document.querySelector('video') ||
-                                    document.querySelector('#player-container-id, ytm-player');
-                                var misplaced = false;
-                                if (plEl) {
-                                    try {
-                                        var rr = row.getBoundingClientRect();
-                                        var prr = plEl.getBoundingClientRect();
-                                        if (rr.height > 0 && prr.height > 0 && rr.top < prr.bottom - 4) misplaced = true;
-                                    } catch (e) {}
-                                }
-                                // Rebuild budget (field log 2026-10-22
-                                // 22:33: added/rebuilt climbed 1:1 into
-                                // the twenties - an endless remove/re-add
-                                // loop churning the page). Judge at most
-                                // twice per video, then accept.
-                                if (!window._phxPillRebuilds) window._phxPillRebuilds = {};
-                                var rb = window._phxPillRebuilds[vid] || 0;
-                                if (!misplaced || rb >= 2) return 'exists';
-                                window._phxPillRebuilds[vid] = rb + 1;
-                                row.remove(); stats.rebuilt++;
-                                report({pill: 'misplaced', vid: vid, stats: stats});
-                                row = null;
-                            }
+                            if (row && row.getAttribute('data-vid') === vid) return 'exists';
                             if (row) { row.remove(); stats.rebuilt++; }
                             var after = null, before = null, how = '';
                             var info = document.querySelector('ytm-slim-video-information-renderer');
@@ -1123,7 +785,6 @@ class BrowserFragment : Fragment() {
                             if (!after && !before) {
                                 var btns = document.querySelectorAll('button, [role="button"], ytm-button-renderer');
                                 for (var b = 0; b < btns.length; b++) {
-                                    if (btns[b].closest('ytm-player, #player, .html5-video-player')) continue;
                                     if ((btns[b].textContent || '').trim() === 'Subscribe') {
                                         after = climbBlock(btns[b], 6);
                                         how = 'subscribe-block';
@@ -1163,7 +824,6 @@ class BrowserFragment : Fragment() {
                         }
                     }
                     var r = ensure();
-                    if (window._phxPillTimer) clearInterval(window._phxPillTimer);
                     var tries = 0;
                     var timer = setInterval(function() {
                         tries++;
@@ -1172,24 +832,11 @@ class BrowserFragment : Fragment() {
                             stats.censusSent = true;
                             report({pill: 'no-anchor-late', vid: currentVid(), census: census()});
                         }
-                        if (tries >= 30) { clearInterval(timer); window._phxPillTimer = null; }
+                        if (tries >= 30) clearInterval(timer);
                     }, 1000);
-                    window._phxPillTimer = timer;
                     if (!window._phoenixPillObserver && document.body) {
                         try {
-                            window._phoenixPillObserver = new MutationObserver(function() {
-                                if (window._phxPillPend) return;
-                                window._phxPillPend = setTimeout(function() {
-                                    window._phxPillPend = null;
-                                    // Causal gate: the row exists
-                                    // for this video = nothing to do,
-                                    // whatever the page mutated.
-                                    var cv = currentVid();
-                                    var rw = document.getElementById('phoenix-dl-row');
-                                    if (cv && rw && rw.getAttribute('data-vid') === cv) return;
-                                    ensure();
-                                }, 650);
-                            });
+                            window._phoenixPillObserver = new MutationObserver(function() { ensure(); });
                             window._phoenixPillObserver.observe(document.body, { childList: true, subtree: true });
                         } catch (e) {}
                     }
