@@ -85,11 +85,14 @@ object YtDlpManager {
     // yt-dlp's own selector matrix, so a stale LIST costs nothing.
     private const val DISK_FORMATS_TTL_MS = 24 * 60 * 60 * 1000L
 
-    private fun formatsCacheDir(): java.io.File? = try {
-        val dir = java.io.File(appContext.filesDir, "formats_cache")
-        if (!dir.exists()) dir.mkdirs()
-        dir
-    } catch (e: Exception) { null }
+    private fun formatsCacheDir(): java.io.File? {
+        return try {
+            val ctx = appContext ?: return null
+            val dir = java.io.File(ctx.filesDir, "formats_cache")
+            if (!dir.exists()) dir.mkdirs()
+            dir
+        } catch (e: Exception) { null }
+    }
 
     private fun persistFormats(key: String, result: FormatsResult) {
         try {
@@ -120,8 +123,9 @@ object YtDlpManager {
         } catch (e: Exception) { /* cache is best-effort */ }
     }
 
-    private fun diskFormats(key: String): FormatsResult? = try {
-        val dir = formatsCacheDir() ?: return null
+    private fun diskFormats(key: String): FormatsResult? {
+        return try {
+            val dir = formatsCacheDir() ?: return null
         val name = key.replace(Regex("[^A-Za-z0-9_-]"), "_") + ".json"
         val file = java.io.File(dir, name)
         if (!file.exists()) return null
@@ -145,8 +149,9 @@ object YtDlpManager {
                 video = readArr(obj.optJSONArray("video"), false),
                 maxHeight = obj.optInt("max", 0),
                 clientUsed = obj.optString("client").ifEmpty { null })
-        }
-    } catch (e: Exception) { null }
+            }
+        } catch (e: Exception) { null }
+    }
 
     /** Stash an Engine-A (page-derived) advisory list for [url]. */
     fun stashAdvisory(url: String, result: FormatsResult) {
