@@ -57,6 +57,28 @@ class BrowserFragment : Fragment() {
         binding.bottomBar.visibility = vis
     }
 
+    // Watch pages only (user 2026-10-23): YouTube's sticky player
+    // reserves a ~48px strip above the video frame (the hidden
+    // header's space — census-proven: the video's top sat at 48 on
+    // every watch page). The black bar must not show, and the host
+    // DOM must not be touched — so the WebView itself shifts up by
+    // the strip's height and its layout box extends by the same
+    // amount at both ends: the strip lands above the screen edge,
+    // the video sits at the very top, and the page keeps the space
+    // at the bottom. The page's own layout is never written to.
+    private var watchShiftApplied = false
+    private fun applyWatchShift(url: String) {
+        if (_binding == null) return
+        val watch = url.contains("youtube.com/watch") || url.contains("youtu.be/")
+        if (watch == watchShiftApplied) return
+        watchShiftApplied = watch
+        val lp = binding.webview.layoutParams as? android.widget.FrameLayout.LayoutParams ?: return
+        val shift = if (watch) (48 * resources.displayMetrics.density).toInt() else 0
+        lp.topMargin = -shift
+        lp.bottomMargin = -shift
+        binding.webview.layoutParams = lp
+    }
+
     override fun onCreateView(
         inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?
     ): View {
@@ -131,6 +153,7 @@ class BrowserFragment : Fragment() {
                 checkForVideo(url)
                 onHostUrlChanged?.invoke(url)
                 updateStandaloneChrome(url)
+                applyWatchShift(url)
             }
 
             override fun onPageFinished(view: WebView, url: String) {
@@ -143,6 +166,7 @@ class BrowserFragment : Fragment() {
                 binding.tvUrl.text = currentUrl
                 checkForVideo(currentUrl)
                 updateStandaloneChrome(currentUrl)
+                applyWatchShift(currentUrl)
                 // Save cookies for yt-dlp bot bypass (from Python file insight)
                 try {
                     com.phoenix.downloader.core.CookieHelper.saveCookiesForUrl(
@@ -163,6 +187,7 @@ class BrowserFragment : Fragment() {
                 checkForVideo(url)
                 onHostUrlChanged?.invoke(url)
                 updateStandaloneChrome(url)
+                applyWatchShift(url)
                 // Re-inject per-video download buttons after SPA navigation
                 injectDownloadButtons(view)
                 injectWatchActions(view)
@@ -448,6 +473,26 @@ class BrowserFragment : Fragment() {
                                 if (host.closest('ytm-player,#player,.html5-video-player,ytm-inline-player')) {
                                     debug.inPlayer++; continue;
                                 }
+                                // Deterministic never-on-the-video rules
+                                // (user 2026-10-23; the rect guard below
+                                // alone had timing holes — a "views"
+                                // badge still landed on the player):
+                                //  - the item for the video now playing
+                                //    (the watch URL's own id) gets no
+                                //    button and no badge, ever;
+                                //  - a host that CONTAINS a <video>
+                                //    (an ancestor of the player, or an
+                                //    inline-playing feed item) is the
+                                //    playing surface, not a list row.
+                                try {
+                                    var curM = location.href.match(/[?&]v=([\w-]{11})/);
+                                    if (curM && curM[1] === vid && /\/watch/.test(location.href)) {
+                                        debug.inPlayer++; continue;
+                                    }
+                                } catch (e) {}
+                                if (host.querySelector('video')) {
+                                    debug.inPlayer++; continue;
+                                }
                                 // Never land on the playing video
                                 // itself (user 2026-10-23): a host whose
                                 // box intersects the <video> rect is
@@ -659,10 +704,18 @@ class BrowserFragment : Fragment() {
                             var pRoot = document.querySelector('#player-container-id, .html5-video-player, ytm-player');
                             var pRect = null;
                             try { pRect = pRoot ? pRoot.getBoundingClientRect() : null; } catch (e) {}
-                            var pb = document.querySelectorAll('#player-container-id button, .html5-video-player button, ytm-player button');
+                            var pb = document.querySelectorAll('#player-container-id button, #player-container-id [role="button"], .html5-video-player button, .html5-video-player [role="button"], ytm-player button, ytm-player [role="button"], .ytp-unmute-button');
                             for (var u = 0; u < pb.length; u++) {
-                                var lbl = (pb[u].getAttribute('aria-label') || '');
-                                if (!/unmute/i.test(lbl)) continue;
+                                // The chip is not always a <button>
+                                // (2026-10-23 hardening): match on
+                                // aria-label, title, or its own short
+                                // text ("TAP TO UNMUTE").
+                                var lbl = (pb[u].getAttribute('aria-label') || '') + ' ' +
+                                    (pb[u].getAttribute('title') || '');
+                                if (!/unmute/i.test(lbl)) {
+                                    var tx = (pb[u].textContent || '').trim();
+                                    if (tx.length > 24 || !/unmute/i.test(tx)) continue;
+                                }
                                 if (pRect && pRect.height > 0) {
                                     var bR = null;
                                     try { bR = pb[u].getBoundingClientRect(); } catch (e) {}
@@ -794,39 +847,52 @@ class BrowserFragment : Fragment() {
                             }
                         } catch (e) {}
                     }
+                    function dlTrayIcon() {
+                        // The user's red tray icon, same art as the
+                        // list buttons (dlIconSvg in the buttons
+                        // script) — built via createElementNS
+                        // (Trusted Types: no innerHTML).
+                        var NS = 'http://www.w3.org/2000/svg';
+                        var svg = document.createElementNS(NS, 'svg');
+                        svg.setAttribute('viewBox', '0 0 24 24');
+                        svg.setAttribute('width', '28');
+                        svg.setAttribute('height', '28');
+                        svg.setAttribute('fill', 'none');
+                        svg.setAttribute('stroke', '#e62117');
+                        svg.setAttribute('stroke-width', '2.1');
+                        svg.setAttribute('stroke-linecap', 'round');
+                        svg.setAttribute('stroke-linejoin', 'round');
+                        var d = ['M12 3.8v10.7', 'M6.6 9.9 12 15.3l5.4-5.4',
+                            'M4 15v3.6A2.4 2.4 0 0 0 6.4 21h11.2A2.4 2.4 0 0 0 20 18.6V15'];
+                        for (var i = 0; i < d.length; i++) {
+                            var p = document.createElementNS(NS, 'path');
+                            p.setAttribute('d', d[i]);
+                            svg.appendChild(p);
+                        }
+                        return svg;
+                    }
                     function buildPill(vid) {
+                        // User 2026-10-23: the wide DOWNLOAD pill
+                        // clipped inside the page's narrow anchor
+                        // slots ("DOWNLOA") and could land on the
+                        // video. The watch control is now the SAME
+                        // small red icon as the related/list
+                        // buttons, pinned to the RIGHT EDGE of a
+                        // slim row — it fits every anchor, never
+                        // drifts to the center, never covers the
+                        // video. (Builder name kept: the anchor /
+                        // rebuild logic below references it.)
                         var row = document.createElement('div');
                         row.id = 'phoenix-dl-row';
                         row.setAttribute('data-vid', vid);
-                        row.style.cssText = 'display:flex;justify-content:center;background:#ffffff;' +
-                            'border-top:1px solid #eeeeee;border-bottom:1px solid #eeeeee;' +
-                            'padding:11px 0;margin:6px 0;position:relative;z-index:60;';
-                        var pill = document.createElement('span');
-                        pill.style.cssText = 'display:inline-flex;align-items:center;gap:9px;border-radius:999px;' +
-                            'background:linear-gradient(180deg,#f23a2a,#d80f18 55%,#c40d16);' +
-                            'padding:5px 19px 5px 5px;cursor:pointer;' +
-                            'box-shadow:0 3px 8px rgba(216,15,24,.35), inset 0 1px 0 rgba(255,255,255,.35);';
-                        var circ = document.createElement('span');
-                        circ.style.cssText = 'width:28px;height:28px;border-radius:50%;flex:none;' +
-                            'background:radial-gradient(circle at 35% 30%, #c0272d, #7d0a10);' +
-                            'display:flex;align-items:center;justify-content:center;' +
-                            'box-shadow:inset 0 2px 4px rgba(0,0,0,.45);';
-                        var svgNS = 'http://www.w3.org/2000/svg';
-                        var svgEl = document.createElementNS(svgNS, 'svg');
-                        svgEl.setAttribute('viewBox', '0 0 24 24');
-                        svgEl.setAttribute('width', '16');
-                        svgEl.setAttribute('height', '16');
-                        var pathEl = document.createElementNS(svgNS, 'path');
-                        pathEl.setAttribute('fill', '#ffffff');
-                        pathEl.setAttribute('d', 'M12 3.5v10.1l3.4-3.4 1.9 1.9L12 17.4l-5.3-5.3 1.9-1.9 3.4 3.4V3.5zM5 19.2h14V21H5z');
-                        svgEl.appendChild(pathEl);
-                        circ.appendChild(svgEl);
-                        var txt = document.createElement('span');
-                        txt.textContent = 'DOWNLOAD';
-                        txt.style.cssText = 'color:#ffffff;font-weight:800;font-size:14px;letter-spacing:.6px;';
-                        pill.appendChild(circ);
-                        pill.appendChild(txt);
-                        pill.addEventListener('click', function(e) {
+                        row.style.cssText = 'display:flex;justify-content:flex-end;align-items:center;' +
+                            'background:#ffffff;border-bottom:1px solid #eeeeee;' +
+                            'padding:3px 8px 3px 0;margin:0;position:relative;z-index:60;';
+                        var btn = document.createElement('div');
+                        btn.style.cssText = 'width:40px;height:40px;flex:none;display:flex;' +
+                            'align-items:center;justify-content:center;cursor:pointer;';
+                        btn.appendChild(dlTrayIcon());
+                        btn.addEventListener('click', function(e) {
                             e.stopPropagation();
                             e.preventDefault();
                             var v = currentVid();
@@ -836,7 +902,7 @@ class BrowserFragment : Fragment() {
                                     document.title.replace(/\s*-\s*YouTube\s*$/, ''));
                             }
                         }, true);
-                        row.appendChild(pill);
+                        row.appendChild(btn);
                         return row;
                     }
                     // Structural: climb from a known-present element to

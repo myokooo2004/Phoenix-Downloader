@@ -67,6 +67,7 @@ class MainActivity : AppCompatActivity() {
             when (item.itemId) {
                 R.id.nav_home -> { showHome(); true }
                 R.id.nav_downloads -> { showDownloads(); true }
+                R.id.nav_files -> { showDownloads(com.phoenix.downloader.ui.downloads.DownloadsFragment.MODE_DONE); true }
                 else -> false
             }
         }
@@ -127,11 +128,19 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    fun showDownloads() {
-        supportFragmentManager.beginTransaction().replace(R.id.nav_host, DownloadsFragment()).commit()
-        if (binding.bottomNav.selectedItemId != R.id.nav_downloads) {
+    /**
+     * The DOWNLOAD tab and the home top bar's downloads button are
+     * the same destination (user, 2026-10-23): in-progress downloads.
+     * MY FILES is the same screen in its completed-only mode.
+     */
+    fun showDownloads(mode: Int = DownloadsFragment.MODE_ACTIVE) {
+        supportFragmentManager.beginTransaction()
+            .replace(R.id.nav_host, DownloadsFragment.newInstance(mode))
+            .commit()
+        val itemId = if (mode == DownloadsFragment.MODE_DONE) R.id.nav_files else R.id.nav_downloads
+        if (binding.bottomNav.selectedItemId != itemId) {
             suppressNavListener = true
-            binding.bottomNav.selectedItemId = R.id.nav_downloads
+            binding.bottomNav.selectedItemId = itemId
             suppressNavListener = false
         }
     }

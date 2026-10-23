@@ -27,14 +27,30 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * My Files: "Downloading" section (live progress / speed / ETA, pause,
- * resume, cancel — driven by DownloadEngine) above the "Downloaded"
- * section (tap to play in the built-in player, share, delete).
+ * One screen, two modes (user split, 2026-10-23):
+ *  - MODE_ACTIVE ("Download" tab; also the home top bar's downloads
+ *    button): in-progress downloads only — live progress / speed /
+ *    ETA, pause, resume, cancel, driven by DownloadEngine.
+ *  - MODE_DONE ("My Files" tab): completed downloads only — tap to
+ *    play in the built-in player, share, delete.
  */
 class DownloadsFragment : Fragment() {
     private var _binding: FragmentDownloadsBinding? = null
     private val binding get() = _binding!!
     private val adapter = DownloadsAdapter()
+
+    private val mode: Int
+        get() = arguments?.getInt(ARG_MODE, MODE_ACTIVE) ?: MODE_ACTIVE
+
+    companion object {
+        const val MODE_ACTIVE = 0
+        const val MODE_DONE = 1
+        private const val ARG_MODE = "mode"
+
+        fun newInstance(mode: Int) = DownloadsFragment().apply {
+            arguments = Bundle().apply { putInt(ARG_MODE, mode) }
+        }
+    }
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
         _binding = FragmentDownloadsBinding.inflate(inflater, container, false)
@@ -45,6 +61,12 @@ class DownloadsFragment : Fragment() {
         super.onViewCreated(view, savedInstanceState)
         binding.rvDownloads.layoutManager = LinearLayoutManager(requireContext())
         binding.rvDownloads.adapter = adapter
+        binding.tvTitle.setText(
+            if (mode == MODE_DONE) R.string.title_downloads else R.string.title_download_active
+        )
+        binding.tvEmpty.setText(
+            if (mode == MODE_DONE) R.string.empty_files else R.string.empty_downloads
+        )
         rebuild()
         viewLifecycleOwner.lifecycleScope.launch {
             DownloadEngine.records.collect { rebuild() }
@@ -93,12 +115,12 @@ class DownloadsFragment : Fragment() {
         }?.sortedByDescending { it.lastModified() } ?: emptyList())
 
         val rows = mutableListOf<Row>()
-        if (active.isNotEmpty()) {
+        if (mode == MODE_ACTIVE && active.isNotEmpty()) {
             rows.add(Row.Header("Downloading • ${active.size}"))
             active.forEach { rows.add(Row.Active(it)) }
         }
         val doneCount = doneRecords.size + scanned.size
-        if (doneCount > 0) {
+        if (mode == MODE_DONE && doneCount > 0) {
             rows.add(Row.Header("Downloaded • $doneCount"))
             doneRecords.forEach { rows.add(Row.Done(it, File(it.filePath!!))) }
             scanned.forEach { rows.add(Row.Done(null, it)) }

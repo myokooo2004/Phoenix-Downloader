@@ -416,15 +416,20 @@ object DownloadEngine {
         } else {
             val heightSel =
                 "bestvideo[height<=${item.height}]+bestaudio/best[height<=${item.height}]"
+            // DASH tiers are two separate lines (user, 2026-10-23):
+            // pull the video line AND the audio line, then merge.
+            // The old exact attempt took the video line alone — a
+            // silent file even when it won.
+            val exactSel = "${item.formatId}+bestaudio/${item.formatId}"
             val exact = "exact" to baseRequest(context, item, dir).apply {
                 clientArg(this, item.client)
-                addOption("-f", item.formatId)
+                addOption("-f", exactSel)
                 addOption("--merge-output-format", item.container.lowercase())
             }
             val heights = listOf(
+                "height-default" to null,
                 "height-tv" to "tv",
-                "height-web_safari" to "web_safari",
-                "height-default" to null
+                "height-web_safari" to "web_safari"
             ).map { (label, client) ->
                 label to baseRequest(context, item, dir).apply {
                     clientArg(this, client)
@@ -435,14 +440,22 @@ object DownloadEngine {
             // Picks that came from the /player metadata list carry an
             // itag yt-dlp's own client may not offer — height intent is
             // the contract there, so it goes first and the exact itag
-            // becomes the last resort. Extraction-sourced picks keep
-            // exact-first (their ids are authoritative).
+            // becomes the last resort.
+            //
+            // Extraction-sourced picks (2026-10-23, field logs): the
+            // exact attempt kept dying first with an empty error at
+            // >=1080p (~17s) and the tv client next ("page needs to
+            // be reloaded", ~7s) — ~25s of failures before any byte.
+            // The client that just listed the formats (default) now
+            // leads with the height pair; exact (with audio) second;
+            // the remaining clients are the fallback, not the gate.
             if (item.client == "player-meta") {
                 attempts.addAll(heights)
                 attempts.add(exact)
             } else {
+                attempts.add(heights[0])
                 attempts.add(exact)
-                attempts.addAll(heights)
+                attempts.addAll(heights.drop(1))
             }
         }
         return attempts

@@ -955,9 +955,20 @@ object YtDlpManager {
             }
             val latest = fetchLatestYtDlpTag()
             if (latest == null) {
-                // GitHub unreachable: stay silent, do not stamp the
-                // gate — the next session retries the check.
-                logNote("YtDlpManager.update", "check failed — latest release unreachable")
+                // GitHub unreachable: stay silent, but DO stamp the
+                // gate and finish for this session (2026-10-23): the
+                // old no-stamp behaviour made every download re-pay
+                // the failing check on bad networks — part of the
+                // "download starts slowly" field complaint. The 24h
+                // cadence still governs the next real check.
+                try {
+                    prefs?.edit()
+                        ?.putLong(PREF_LAST_UPDATE_CHECK_MS, System.currentTimeMillis())
+                        ?.apply()
+                } catch (_: Exception) {
+                }
+                logNote("YtDlpManager.update", "check failed — latest release unreachable; gated 24h")
+                updateDone = true
                 return
             }
             try {
